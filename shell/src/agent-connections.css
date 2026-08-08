@@ -1,0 +1,103 @@
+.agent-connections {
+  width: min(760px, calc(100% - 48px));
+  flex: 1;
+  overflow: auto;
+  margin: 0 auto;
+  padding: 36px 0 32px;
+  color: #1e293b;
+}
+
+.agent-connection-card, .connections-view {
+  min-width: 0;
+  border: 1px solid #e2e8f0;
+  border-radius: 14px;
+  background: #fff;
+  box-shadow: 0 4px 14px rgba(30, 41, 59, .035);
+}
+
+.agent-connection-card { margin-bottom: 8px; padding: 14px 16px 16px; }
+.connections-section-title { margin: 0 0 17px; color: #0f172a; font-size: 20px; line-height: 1.2; letter-spacing: -.035em; }
+.agent-connection-card .connections-section-title { margin-bottom: 9px; font-size: 18px; }
+.agent-connection-head { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 10px; }
+.agent-connection-state { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.agent-connection-state > div { min-width: 0; display: grid; gap: 1px; }
+.agent-connection-state strong { overflow: hidden; color: #0f172a; font-size: 15px; text-overflow: ellipsis; white-space: nowrap; }
+.agent-connection-dot { width: 10px; height: 10px; flex: none; border-radius: 50%; background: #cbd5e1; box-shadow: 0 0 0 4px #f1f5f9; }
+.agent-connection-dot.online { background: #87b7eb; box-shadow: 0 0 0 4px #e6f0fb; }
+
+.agent-provider-control { min-width: 0; display: flex; align-items: center; gap: 8px; }
+.agent-provider-selector { min-width: 0; flex: 1; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); padding: 2px; border: 1px solid #dbe3ed; border-radius: 8px; background: #fff; }
+.agent-provider-option { position: relative; min-width: 0; cursor: pointer; }
+.agent-provider-option + .agent-provider-option { border-left: 1px solid #eef2f7; }
+.agent-provider-option input { position: absolute; opacity: 0; pointer-events: none; }
+.agent-provider-option span { min-height: 44px; display: flex; align-items: center; justify-content: center; padding: 0 12px; border-radius: 6px; color: #334155; font-size: 12px; font-weight: 700; white-space: nowrap; transition: color 150ms ease, background-color 150ms ease; }
+.agent-provider-option input:checked + span { color: #09203a; background: #edf4fb; }
+.agent-provider-option input:focus-visible + span { position: relative; z-index: 1; outline: 2px solid #6ea5dc; outline-offset: 1px; }
+.agent-provider-option input:disabled + span { cursor: not-allowed; opacity: .6; }
+.agent-connect-button { min-width: 94px; min-height: 44px; flex: none; padding: 0 14px; border: 0; border-radius: 7px; color: #09203a; background: #87b7eb; font-size: 12px; font-weight: 760; white-space: nowrap; }
+.agent-connect-button:hover:not(:disabled) { background: #78aae0; }
+
+.agent-install-card { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 8px; padding: 9px 10px; border: 1px solid #cfe0f4; border-radius: 9px; background: #f5f9fe; }
+.agent-install-card > div { min-width: 0; display: grid; gap: 2px; }
+.agent-install-card strong { color: #1e293b; font-size: 12px; }
+.agent-install-card span { color: #64748b; font-size: 11px; }
+.agent-connect-action { min-height: 44px; padding: 0 12px; border: 0; border-radius: 8px; color: #09203a; background: #87b7eb; font-size: 11px; font-weight: 760; white-space: nowrap; }
+.agent-connect-action:hover:not(:disabled) { filter: brightness(.96); }
+
+.agent-signin-code { margin-top: 10px; padding-top: 10px; border-top: 1px solid #eef2f7; }
+.agent-signin-code > p { margin: 0 0 8px; color: #64748b; font-size: 11px; }
+.agent-signin-row { display: flex; align-items: center; gap: 8px; }
+.agent-signin-row input { min-width: 0; flex: 1; min-height: 44px; padding: 0 10px; border: 1px solid #dbe3ed; border-radius: 8px; color: #0f172a; background: #fff; font-size: 12px; }
+.agent-connections button { cursor: pointer; touch-action: manipulation; transition: background-color 150ms ease, border-color 150ms ease, opacity 150ms ease, transform 150ms ease; }
+.agent-connections button:disabled { cursor: not-allowed; opacity: .6; }
+.agent-signin-row input:focus-visible, .agent-connections button:focus-visible { outline: 2px solid #6ea5dc; outline-offset: 2px; }
+.agent-connection-error { margin: 12px 0 0; color: #9f1239; font-size: 11px; line-height: 1.5; }
+
+.connections-view { padding: 20px; }
+.connections-view-head { display: flex; align-items: flex-end; justify-content: space-between; gap: 16px; margin-bottom: 16px; }
+.connections-view-head .connections-section-title { margin: 0; }
+.connections-view-actions { display: flex; align-items: center; gap: 8px; }
+.connections-round-action { width: 44px; height: 44px; flex: none; display: grid; place-items: center; padding: 0; border: 1px solid #e2e8f0; border-radius: 50%; color: #94a3b8; background: #fff; font-size: 16px; line-height: 1; }
+.connections-round-action:hover:not(:disabled) { color: #475569; background: #f8fafc; }
+.connections-add-action, .connections-revoke-action { min-height: 44px; padding: 0 11px; border: 1px solid #dbe3ed; border-radius: 8px; color: #1e293b; background: #fff; font-size: 11px; font-weight: 740; }
+.connections-add-action:hover:not(:disabled), .connections-revoke-action:hover:not(:disabled) { background: #f8fafc; }
+.connections-add-action[aria-expanded="true"] { border-color: #87b7eb; color: #09203a; background: #e6f0fb; }
+.connections-blocker { margin: 0; color: #64748b; font-size: 12px; line-height: 1.55; }
+
+.connections-pair-card { margin: 0 0 14px; padding: 18px 16px 15px; border: 1px solid #e2e8f0; border-radius: 13px; background: #f8fafc; }
+.connections-pair-qr { position: relative; width: min(100%, 236px); margin: 0 auto; padding: 11px; border-radius: 11px; background: #fff; }
+.connections-pair-qr svg { display: block; width: 100%; height: auto; shape-rendering: crispEdges; }
+.connections-pair-cover { position: absolute; inset: 0; display: grid; place-items: center; border-radius: 11px; color: #fff; background: rgba(15, 23, 42, .78); font-size: 15px; font-weight: 760; }
+.connections-pair-loading { width: min(100%, 236px); height: 236px; margin: 0 auto; border-radius: 11px; background: #fff; }
+.connections-pair-expiry { margin: 12px 0 0; color: #64748b; font-size: 12px; text-align: center; font-variant-numeric: tabular-nums; }
+.connections-renew { margin: 11px auto 0; }
+.connections-pair-scan { margin: 5px 0 0; color: #94a3b8; font-size: 12px; text-align: center; }
+
+.connections-device-rows { margin: 0; padding: 0; list-style: none; }
+.connections-device-rows:empty { display: none; }
+.connections-device-rows li { display: grid; grid-template-columns: 34px minmax(0, 1fr) auto; align-items: center; gap: 10px; min-height: 58px; border-top: 1px solid #eef2f7; }
+.connections-device-icon { width: 30px; height: 30px; display: grid; place-items: center; border-radius: 9px; color: #64748b; background: #f1f5f9; font-size: 18px; }
+.connections-device-rows li > span:nth-child(2) { min-width: 0; display: grid; gap: 2px; }
+.connections-device-rows strong, .connections-device-rows small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.connections-device-rows strong { color: #1e293b; font-size: 13px; }
+.connections-device-rows small { color: #94a3b8; font-size: 10px; }
+.connections-revoke-action { color: #9f1239; }
+
+@media (max-width: 720px) {
+  .agent-connections { width: calc(100% - 24px); padding-top: 22px; }
+  .agent-connection-card, .connections-view { padding: 14px; }
+  .connections-view-head { align-items: flex-start; flex-direction: column; gap: 10px; }
+  .agent-provider-control { gap: 6px; }
+  .agent-provider-option span { padding: 0 8px; font-size: 11px; }
+  .agent-connect-button { min-width: 84px; padding: 0 10px; }
+  .agent-install-card, .agent-signin-row { align-items: stretch; flex-direction: column; }
+  .agent-connect-action { width: 100%; }
+  .connections-view-actions { width: 100%; }
+  .connections-view-actions .connections-add-action { flex: 1; }
+  .connections-device-rows li { grid-template-columns: 34px minmax(0, 1fr); padding: 8px 0; }
+  .connections-revoke-action { grid-column: 2; justify-self: start; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .agent-connections * { scroll-behavior: auto; transition-duration: .01ms !important; animation-duration: .01ms !important; animation-iteration-count: 1 !important; }
+}

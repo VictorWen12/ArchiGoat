@@ -1,0 +1,89 @@
+:root {
+  color: #09203a;
+  background: #fff;
+  font: 14px/1.5 Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+}
+
+* { box-sizing: border-box; }
+body { margin: 0; min-width: 320px; height: 100vh; overflow: hidden; background: #fff; }
+button, input, textarea { font: inherit; }
+button { cursor: pointer; }
+button:disabled { cursor: not-allowed; opacity: .55; }
+a { color: inherit; }
+
+.app-shell, #root { height: 100%; }
+.app-shell { display: flex; flex-direction: column; }
+.topbar { height: 58px; flex: none; display: flex; align-items: center; justify-content: space-between; padding: 0 24px; border-bottom: 1px solid #e2e8f0; background: #fff; }
+.brand { display: flex; align-items: center; gap: 10px; font-size: 17px; font-weight: 780; letter-spacing: -.03em; }
+.brand img { width: 30px; height: 30px; border-radius: 8px; object-fit: contain; }
+.workspace { min-height: 0; flex: 1; display: grid; grid-template-columns: 232px minmax(0, 1fr); }
+.sidebar { min-height: 0; display: flex; flex-direction: column; border-right: 1px solid #e2e8f0; background: #fff; }
+.sidebar-nav { min-height: 0; flex: 1; display: grid; align-content: start; gap: 2px; margin: 0 10px; }
+.sidebar-nav button { min-height: 36px; display: flex; align-items: center; padding: 0 11px; border: 0; border-radius: 8px; color: #475569; background: transparent; font-size: 13px; font-weight: 640; text-align: left; }
+.sidebar-nav button:hover { background: #e8f1fb; }
+.sidebar-nav button.selected { color: #09203a; background: #e8f1fb; }
+.new-work { min-height: 42px; margin: 16px 12px 12px; border: 0; border-radius: 9px; color: #09203a; background: #87b7eb; font-weight: 760; }
+.new-work:hover { filter: brightness(.96); }
+.muted { margin: 8px 10px; color: #64748b; font-size: 12px; }
+.sidebar-foot { flex: none; padding: 15px 17px; border-top: 1px solid #eef2f7; color: #64748b; font-size: 11px; }
+.sidebar-foot a { color: #326aa0; text-decoration: none; }
+.sidebar-foot a:hover { text-decoration: underline; }
+
+.page { min-width: 0; min-height: 0; display: flex; flex-direction: column; background: #fff; }
+.creator-surface { min-width: 0; min-height: 0; flex: 1; display: flex; flex-direction: column; overflow: hidden; background: #fff; }
+.creator-surface > .creator-chat,
+.creator-surface > .build-preview-screen { min-height: 0; flex: 1; }
+.page > .build-preview-screen,
+.page > .publish-screen { min-height: 0; height: 100%; }
+.tool { min-height: 31px; padding: 0 10px; border: 1px solid #e2e8f0; border-radius: 7px; color: #475569; background: #fff; font-size: 12px; }
+.tool:hover { background: #e8f1fb; }
+
+.quit-ask { position: fixed; inset: 0; z-index: 20; display: grid; place-items: center; padding: 24px; background: rgba(15, 23, 42, .38); }
+.quit-card { width: min(400px, 100%); padding: 22px; border-radius: 16px; background: #fff; box-shadow: 0 18px 50px rgba(30, 41, 59, .22); }
+.quit-card strong { display: block; color: #0f172a; font-size: 16px; letter-spacing: -.02em; }
+.quit-card p { margin: 8px 0 18px; color: #64748b; font-size: 13px; line-height: 1.55; }
+.quit-actions { display: flex; gap: 8px; }
+.quit-actions .primary { min-height: 37px; flex: 1; margin-top: 0; padding: 0 14px; }
+.quit-actions .tool { min-height: 37px; padding: 0 14px; }
+
+.primary { min-height: 41px; margin-top: 4px; border: 0; border-radius: 8px; color: #09203a; background: #87b7eb; font-weight: 760; }
+
+.welcome { min-height: 100%; display: grid; place-items: center; background: #fff; }
+.welcome-panel { width: 100%; min-height: 100%; display: grid; place-items: center; padding: 40px 24px; }
+.welcome-card { width: min(392px, 100%); text-align: center; }
+.welcome-brand { display: flex; align-items: center; justify-content: center; gap: 16px; margin-bottom: 28px; }
+.welcome-brand-art { width: 112px; height: 72px; flex: none; overflow: hidden; border-radius: 10px; }
+.welcome-brand-art img { display: block; width: 100%; height: 100%; object-fit: cover; object-position: 50% 60%; }
+.welcome-brand h1 { margin: 0; color: #0f172a; font-size: clamp(28px, 4vw, 34px); font-weight: 780; letter-spacing: -.045em; white-space: nowrap; }
+.signin-tg { width: 100%; min-height: 52px; display: flex; align-items: center; justify-content: center; gap: 11px; padding: 0 16px; border: 0; border-radius: 11px; color: #09203a; background: #87b7eb; font-size: 15px; font-weight: 760; }
+.signin-tg:hover:not(:disabled) { filter: brightness(.96); }
+.signin-tg:focus-visible { outline: 0; box-shadow: 0 0 0 3px rgba(110, 165, 220, .45); }
+.tg-mark { width: 28px; height: 28px; flex: none; border-radius: 8px; background: #fff; display: grid; place-items: center; }
+.tg-mark img { width: 80%; height: 80%; object-fit: contain; }
+.signin-spin { width: 15px; height: 15px; flex: none; border-radius: 50%; border: 2px solid rgba(9, 32, 58, .28); border-top-color: #09203a; animation: spin .7s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+.welcome-hint { margin: 14px 0 0; color: #64748b; font-size: 12px; line-height: 1.5; }
+.welcome-notice { display: flex; align-items: flex-start; gap: 8px; margin: 14px 0 0; color: #7c5219; font-size: 12px; line-height: 1.5; }
+.welcome-notice::before { content: ""; width: 6px; height: 6px; margin-top: 6px; flex: none; border-radius: 50%; background: #d4a13a; }
+.welcome-notice.hard { color: #9f1239; }
+.welcome-notice.hard::before { background: #e11d48; }
+.notice-retry { border: 0; background: none; padding: 0; color: #326aa0; font: inherit; text-decoration: underline; }
+
+@media (max-width: 900px) {
+  .welcome-panel { padding: 28px 20px; }
+}
+
+@media (max-width: 720px) {
+  body { overflow: auto; }
+  .topbar { padding: 0 14px; }
+  .workspace { min-height: calc(100vh - 58px); grid-template-columns: 1fr; grid-template-rows: auto minmax(0, 1fr); }
+  .sidebar { border-right: 0; border-bottom: 1px solid #e2e8f0; }
+  .sidebar-nav { flex: none; display: flex; margin: 0 12px 10px; }
+  .sidebar-nav button { flex: 1; justify-content: center; }
+  .new-work { margin: 10px 12px; }
+  .sidebar-foot { display: none; }
+}
+
+@media (prefers-reduced-motion: reduce) { .signin-spin { animation: none; } }

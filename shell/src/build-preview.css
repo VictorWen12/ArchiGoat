@@ -1,0 +1,241 @@
+.build-preview-screen {
+  min-height: 100dvh;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.build-screen {
+  display: grid;
+  place-items: center;
+  padding: clamp(28px, 7vw, 88px) 24px;
+  color: #09203a;
+  background: #fff;
+  background-image: radial-gradient(circle at 50% 35%, #e8f1fb, transparent 42%), linear-gradient(135deg, #fff, #e8f1fb 70%, #fff);
+}
+
+.build-shell {
+  width: min(660px, 100%);
+}
+
+.build-screen h1 {
+  max-width: 620px;
+  margin: 0;
+  color: #09203a;
+  font-size: clamp(32px, 7vw, 64px);
+  font-weight: 760;
+  letter-spacing: -.06em;
+  line-height: .98;
+}
+
+.build-line {
+  max-width: 520px;
+  margin: 18px 0 0;
+  color: #326aa0;
+  font-size: 15px;
+  line-height: 1.55;
+}
+
+.build-clock {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  margin: 18px 0 0;
+  font-variant-numeric: tabular-nums;
+}
+
+.build-elapsed {
+  color: #09203a;
+  font-size: 26px;
+  font-weight: 760;
+  letter-spacing: -.04em;
+}
+
+.build-typical {
+  color: #64748b;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.build-bar {
+  overflow: hidden;
+  height: 8px;
+  margin-top: 10px;
+  border-radius: 999px;
+  background: #dbe3ed;
+}
+
+.build-bar > span {
+  display: block;
+  height: 100%;
+  border-radius: 999px;
+  background: #87b7eb;
+  transition: width .5s linear;
+}
+
+.build-failure {
+  max-width: 520px;
+  margin: 16px 0 0;
+  color: #9f1239;
+  font-size: 14px;
+  line-height: 1.55;
+}
+
+.build-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 20px;
+}
+
+.build-actions button,
+.preview-actions button {
+  min-height: 44px;
+  padding: 0 16px;
+  border: 1px solid transparent;
+  border-radius: 9px;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 760;
+}
+
+.build-stop,
+.build-retry,
+.preview-edit {
+  border-color: #dbe3ed !important;
+  color: #09203a;
+  background: #fff;
+}
+
+.preview-continue {
+  color: #09203a;
+  background: #87b7eb;
+}
+
+.build-actions button:hover:not(:disabled),
+.preview-actions button:hover:not(:disabled) {
+  filter: brightness(1.06);
+}
+
+.build-actions button:focus-visible,
+.preview-actions button:focus-visible,
+.preview-canvas > :focus-visible {
+  outline: 3px solid #87b7eb;
+  outline-offset: 3px;
+}
+
+.preview-screen {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 18px;
+  overflow: hidden;
+  color: #09203a;
+  background: #fff;
+}
+
+.preview-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  min-height: 48px;
+  flex: none;
+}
+
+.preview-title {
+  min-width: 0;
+}
+
+.preview-title span {
+  display: block;
+  margin-bottom: 4px;
+  color: #326aa0;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: .14em;
+  text-transform: uppercase;
+}
+
+.preview-title h1 {
+  max-width: min(60vw, 720px);
+  margin: 0;
+  overflow: hidden;
+  color: #09203a;
+  font-size: clamp(18px, 3vw, 28px);
+  font-weight: 700;
+  letter-spacing: -.04em;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.preview-actions {
+  display: flex;
+  flex: none;
+  gap: 7px;
+}
+
+.preview-canvas {
+  position: relative;
+  min-height: 0;
+  flex: 1;
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+  border: 1px solid #dbe3ed;
+  border-radius: 16px;
+  background: #fff;
+  touch-action: manipulation;
+}
+
+.preview-canvas > img,
+.preview-canvas > video,
+.preview-canvas > iframe {
+  display: block;
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  border: 0;
+  background: #fff;
+}
+
+.preview-canvas > img,
+.preview-canvas > video {
+  object-fit: contain;
+}
+
+.preview-canvas > iframe {
+  align-self: stretch;
+}
+
+.preview-loading,
+.preview-unavailable,
+.preview-error {
+  max-width: 360px;
+  margin: 24px;
+  text-align: center;
+  line-height: 1.55;
+}
+
+.preview-loading,
+.preview-unavailable {
+  color: #475569;
+  font-size: 13px;
+}
+
+.preview-error {
+  padding: 12px 14px;
+  border: 1px solid #fecdd3;
+  border-radius: 10px;
+  color: #9f1239;
+  background: #fff;
+  font-size: 12px;
+}
+
+@media (max-width: 620px) {
+  .build-screen { padding: 28px 16px; }
+  .preview-screen { padding: 12px; }
+  .preview-toolbar { align-items: flex-start; flex-direction: column; }
+  .preview-title h1 { max-width: 100%; }
+  .preview-actions { width: 100%; }
+  .preview-actions button { flex: 1; }
+}

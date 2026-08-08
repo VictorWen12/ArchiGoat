@@ -1,0 +1,478 @@
+# Build the signed macOS app in parallel and publish one immutable release.
+name: ArchiGoat Release
+
+on:
+  push:
+    tags: ["v*.*.*"]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Windows candidate version
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+env:
+  PRODUCT_NAME: ${{ vars.PRODUCT_NAME || 'ArchiGoat' }}
+  ACCOUNT_URL: ${{ vars.ACCOUNT_URL || 'https://triangoat.com' }}
+  RELEASE_FEED_ORIGIN: ${{ vars.RELEASE_FEED_ORIGIN || 'https://github.com/VictorWen12/ArchiGoat/releases/latest/download' }}
+  ARTIFACT_ORIGIN: ${{ vars.ARTIFACT_ORIGIN }}
+  ARCHIGOAT_BUNDLE_ID: ${{ vars.ARCHIGOAT_BUNDLE_ID || 'com.archigoat.app' }}
+  ARCHIGOAT_URL_SCHEME: ${{ vars.ARCHIGOAT_URL_SCHEME || 'archigoat' }}
+  ARCHIGOAT_ASSET_STEM: ${{ vars.ARCHIGOAT_ASSET_STEM || 'archigoat' }}
+
+concurrency:
+  group: archigoat-release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  # Identity is pure git + a node contract check: no macOS runner, no secrets, no environment gate.
+  identity:
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      version: ${{ steps.identity.outputs.version }}
+      tag: ${{ steps.identity.outputs.tag }}
+      commit: ${{ steps.identity.outputs.commit }}
+      macos_asset: ${{ steps.identity.outputs.macos_asset }}
+      windows_asset: ${{ steps.identity.outputs.windows_asset }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate release identity
+        id: identity
+        run: |
+          set -Eeuo pipefail
+          version="${GITHUB_REF_NAME#v}"
+          [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          IFS=. read -r major minor patch <<< "$version"
+          (( major >= 1 ))
+          commit="$(git rev-parse HEAD)"
+          [[ "$commit" =~ ^[0-9a-f]{40}$ ]]
+          # ^{commit} peels annotated/signed tags: bare refs/tags/<tag> resolves to the tag object.
+          [[ "$(git rev-parse "refs/tags/$GITHUB_REF_NAME^{commit}")" = "$commit" ]]
+          node --test test/function/triangoat-sign-in-contract.mjs test/function/macos-bundle-entry-contract.mjs test/function/windows-installer-contract.mjs
+          node release/production-contract.mjs archigoat-build
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "tag=$GITHUB_REF_NAME" >> "$GITHUB_OUTPUT"
+          echo "commit=$commit" >> "$GITHUB_OUTPUT"
+          echo "macos_asset=${ARCHIGOAT_ASSET_STEM}-macos.dmg" >> "$GITHUB_OUTPUT"
+          echo "windows_asset=archigoat-windows-x64-setup.exe" >> "$GITHUB_OUTPUT"
+
+  # This candidate is intentionally unsigned and Actions-only until SignPath approves the project.
+  # It has no dependency edge to the macOS release job.
+  windows-candidate:
+    if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
+    runs-on: windows-latest
+    timeout-minutes: 30
+    env:
+      MANUAL_VERSION: ${{ inputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Derive Windows release identity
+        shell: pwsh
+        run: |
+          $version = if ($env:GITHUB_EVENT_NAME -eq 'workflow_dispatch') { $env:MANUAL_VERSION } else { $env:GITHUB_REF_NAME -replace '^v', '' }
+          if ($version -notmatch '^\d+\.\d+\.\d+$') { throw "Invalid release version: $version" }
+          "ARCHIGOAT_VERSION=$version" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "ARCHIGOAT_WINDOWS_ASSET=archigoat-windows-x64-setup.exe" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: shell/package-lock.json
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: 1.94.1
+          targets: x86_64-pc-windows-msvc
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: shell/src-tauri
+          shared-key: shell-x86_64-pc-windows-msvc-${{ env.ARCHIGOAT_ASSET_STEM }}
+          cache-all-crates: true
+          save-if: false
+      - name: Install JavaScript dependencies
+        run: npm ci --prefix shell --no-audit --no-fund
+      - name: Inject tagged Tauri version
+        shell: pwsh
+        run: |
+          $path = 'shell/src-tauri/tauri.conf.json'
+          $json = Get-Content $path -Raw
+          if ($json -notmatch '"version"\s*:\s*"[^"]+"') { throw 'Tauri version field was not found' }
+          $updated = $json -replace '("version"\s*:\s*")[^"]+(")', ('${1}' + $env:ARCHIGOAT_VERSION + '${2}')
+          Set-Content -Path $path -Value $updated -Encoding utf8
+          $version = (Get-Content $path -Raw | ConvertFrom-Json).version
+          if ($version -ne $env:ARCHIGOAT_VERSION) { throw "Tauri version is $version, expected $env:ARCHIGOAT_VERSION" }
+      - name: Build frontend
+        run: npm run build --prefix shell
+      - name: Prove Windows runner liveness
+        shell: pwsh
+        run: |
+          rustc --test test/function/windows-runner-liveness.rs -o runner-liveness.exe
+          .\runner-liveness.exe
+      - name: Build NSIS candidate
+        run: npm run tauri --prefix shell -- build --target x86_64-pc-windows-msvc --bundles nsis --ci
+      - name: Name installer candidate
+        shell: pwsh
+        run: |
+          $installer = Get-ChildItem 'shell/src-tauri/target/x86_64-pc-windows-msvc/release/bundle/nsis' -Filter '*-setup.exe' |
+            Sort-Object LastWriteTime -Descending |
+            Select-Object -First 1
+          if ($null -eq $installer) { throw 'NSIS installer was not produced' }
+          New-Item -ItemType Directory -Force -Path out | Out-Null
+          Copy-Item $installer.FullName "out/$env:ARCHIGOAT_WINDOWS_ASSET"
+          "ARCHIGOAT_INSTALLER=$($installer.FullName)" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+      - name: Verify unsigned candidate before any publish
+        shell: pwsh
+        run: |
+          $installer = Get-Item $env:ARCHIGOAT_INSTALLER
+          $signature = Get-AuthenticodeSignature -FilePath $installer.FullName
+          if ($signature.Status -ne 'NotSigned') { throw "Candidate is not deliberately unsigned: $($signature.Status)" }
+          $kits = Join-Path ${env:ProgramFiles(x86)} 'Windows Kits\10\bin'
+          $signtool = Get-ChildItem $kits -Filter signtool.exe -Recurse -ErrorAction SilentlyContinue |
+            Where-Object FullName -match '\\x64\\signtool\.exe$' |
+            Select-Object -First 1
+          if ($null -eq $signtool) { throw 'Windows SDK signtool.exe was not found' }
+          $verify = Start-Process -FilePath $signtool.FullName -ArgumentList @('verify', '/pa', '/v', $installer.FullName) -NoNewWindow -Wait -PassThru
+          if ($verify.ExitCode -eq 0) { throw 'Unsigned candidate unexpectedly passed Authenticode verification' }
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-installer-candidate
+          path: out/archigoat-windows-x64-setup.exe
+          if-no-files-found: error
+          retention-days: 1
+
+  # The web shell is x64 Linux work; it must never occupy a macOS runner.
+  web-shell:
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: shell/package-lock.json
+      - run: |
+          npm ci --prefix shell --no-audit --no-fund
+          npm run build --prefix shell
+      - uses: actions/upload-artifact@v4
+        with:
+          name: web-shell
+          path: shell/dist
+          if-no-files-found: error
+          retention-days: 1
+
+  # GitHub-hosted macOS concurrency is capped at 5 jobs, and this workflow wants exactly 5:
+  # stage-app + build-daemon x2 + build-shell x2. A sixth job would silently queue behind them
+  # and re-serialize the build, so no other job may take a macos-14 runner.
+
+  # Icons and Info.plist have zero dependency on the Rust binaries,
+  # and version/commit are derivable from the tag, so this starts at t=0.
+  stage-app:
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: macos-14
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Stage app bundle assets
+        run: |
+          set -Eeuo pipefail
+          version="${GITHUB_REF_NAME#v}"
+          [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          [[ "$GITHUB_SHA" =~ ^[0-9a-f]{40}$ ]]
+          release/stage-app-macos.sh "$version" "$GITHUB_SHA" stage
+      - uses: actions/upload-artifact@v4
+        with:
+          name: app-stage
+          path: stage
+          if-no-files-found: error
+          retention-days: 1
+
+  # The daemon has no frontend dependency and derives its identity from the tag, so it
+  # starts at t=0 instead of paying for a serial ubuntu hop.
+  build-daemon:
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: macos-14
+    timeout-minutes: 30
+    strategy:
+      fail-fast: true
+      matrix:
+        target: [aarch64-apple-darwin, x86_64-apple-darwin]
+    env:
+      TARGET: ${{ matrix.target }}
+    steps:
+      - name: Derive release identity
+        run: |
+          set -Eeuo pipefail
+          version="${GITHUB_REF_NAME#v}"
+          [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          [[ "$GITHUB_SHA" =~ ^[0-9a-f]{40}$ ]]
+          echo "ARCHIGOAT_VERSION=$version" >> "$GITHUB_ENV"
+          echo "ARCHIGOAT_COMMIT=$GITHUB_SHA" >> "$GITHUB_ENV"
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: 1.94.1
+          targets: ${{ matrix.target }}
+      # shared-key (not key) so the cache written by app-ci.yml on main is restorable here:
+      # the automatic key embeds the job name, which differs between the two workflows.
+      # save-if false: a tag-scoped cache save is unrestorable by any later run.
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: daemon
+          shared-key: daemon-${{ matrix.target }}-${{ env.ARCHIGOAT_ASSET_STEM }}
+          cache-all-crates: true
+          save-if: false
+      - name: Build daemon ${{ matrix.target }}
+        run: |
+          set -Eeuo pipefail
+          cargo build --locked --release --manifest-path daemon/Cargo.toml --target "$TARGET"
+          install -d out
+          install -m 755 "daemon/target/$TARGET/release/archigoat" out/archigoat
+      - uses: actions/upload-artifact@v4
+        with:
+          name: bin-daemon-${{ matrix.target }}
+          path: out/archigoat
+          if-no-files-found: error
+          retention-days: 1
+
+  # The Tauri shell is the long pole (459 crates). Only the final link needs shell/dist, so
+  # this job no longer waits on web-shell as a graph edge: it warms the dependency graph
+  # against a placeholder bundle while web-shell is still bundling, then polls for the real
+  # artifact immediately before the build that ships.
+  build-shell:
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: macos-14
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      actions: read
+    strategy:
+      fail-fast: true
+      matrix:
+        target: [aarch64-apple-darwin, x86_64-apple-darwin]
+    env:
+      TARGET: ${{ matrix.target }}
+    steps:
+      - name: Derive release identity
+        run: |
+          set -Eeuo pipefail
+          version="${GITHUB_REF_NAME#v}"
+          [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          [[ "$GITHUB_SHA" =~ ^[0-9a-f]{40}$ ]]
+          echo "ARCHIGOAT_VERSION=$version" >> "$GITHUB_ENV"
+          echo "ARCHIGOAT_COMMIT=$GITHUB_SHA" >> "$GITHUB_ENV"
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: 1.94.1
+          targets: ${{ matrix.target }}
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: shell/src-tauri
+          shared-key: shell-${{ matrix.target }}-${{ env.ARCHIGOAT_ASSET_STEM }}
+          cache-all-crates: true
+          save-if: false
+      # tauri_build only needs frontendDist to exist to compile the 459 crates underneath the
+      # shell crate. This is pure warm-up: if it fails we lose the head start, nothing else.
+      - name: Warm the dependency graph
+        continue-on-error: true
+        run: |
+          set -Eeuo pipefail
+          cargo fetch --locked --manifest-path shell/src-tauri/Cargo.toml
+          install -d shell/dist
+          printf '<!doctype html><title>warmup</title>' > shell/dist/index.html
+          cargo build --locked --release --manifest-path shell/src-tauri/Cargo.toml --target "$TARGET"
+      # The placeholder must never survive into the shipped bundle, so it is removed before the
+      # download and the shell crate itself is rebuilt from scratch below.
+      - name: Discard the placeholder bundle
+        run: rm -rf shell/dist
+      - name: Wait for the web shell bundle
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -Eeuo pipefail
+          for _ in $(seq 1 90); do
+            if gh api "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/artifacts" \
+              --paginate --jq '.artifacts[].name' | grep -qx web-shell; then
+              exit 0
+            fi
+            sleep 10
+          done
+          echo "web-shell artifact never appeared" >&2
+          exit 1
+      - uses: actions/download-artifact@v4
+        with:
+          name: web-shell
+          path: shell/dist
+      - name: Build shell ${{ matrix.target }}
+        run: |
+          set -Eeuo pipefail
+          test -s shell/dist/index.html
+          if grep -q warmup shell/dist/index.html; then
+            echo "placeholder bundle survived into the shipped build" >&2
+            exit 1
+          fi
+          # Only the shell crate is discarded; the warmed dependency graph is kept.
+          cargo clean --release --manifest-path shell/src-tauri/Cargo.toml --target "$TARGET" -p archigoat-shell
+          cargo build --locked --release --manifest-path shell/src-tauri/Cargo.toml --target "$TARGET"
+          install -d out
+          install -m 755 "shell/src-tauri/target/$TARGET/release/archigoat-shell" out/archigoat-shell
+          ARCHIGOAT_SHELL=out/archigoat-shell node --test test/function/production-shell-contract.mjs
+      - uses: actions/upload-artifact@v4
+        with:
+          name: bin-shell-${{ matrix.target }}
+          path: out/archigoat-shell
+          if-no-files-found: error
+          retention-days: 1
+
+  release:
+    needs: [identity, build-daemon, build-shell, stage-app]
+    runs-on: macos-14
+    environment: release
+    timeout-minutes: 45
+    permissions:
+      contents: write
+    env:
+      MACOS_CERT_P12: ${{ secrets.MACOS_CERT_P12 }}
+      MACOS_CERT_PASSWORD: ${{ secrets.MACOS_CERT_PASSWORD }}
+      APPLE_ID: ${{ secrets.APPLE_ID }}
+      APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
+      MACOS_APP_IDENTITY: ${{ vars.MACOS_APP_IDENTITY }}
+      APPLE_TEAM_ID: ${{ vars.APPLE_TEAM_ID }}
+      ARCHIGOAT_VERSION: ${{ needs.identity.outputs.version }}
+      ARCHIGOAT_COMMIT: ${{ needs.identity.outputs.commit }}
+      VERSION: ${{ needs.identity.outputs.version }}
+      COMMIT: ${{ needs.identity.outputs.commit }}
+      TAG: ${{ needs.identity.outputs.tag }}
+      ASSET: ${{ needs.identity.outputs.macos_asset }}
+      WINDOWS_ASSET: ${{ needs.identity.outputs.windows_asset }}
+    steps:
+      - uses: actions/checkout@v4
+      # The preinstalled runner Node writes the release feed; failing here costs nothing,
+      # failing after notarization would cost the whole Apple queue wait.
+      - name: Prove release toolchain
+        run: |
+          set -Eeuo pipefail
+          node --version
+          node release/production-contract.mjs archigoat-macos
+          # Dry-run the feed generator against a placeholder digest. It parses daemon/src/api.rs,
+          # so a drifted PROTOCOL declaration must fail here and not after the Apple queue wait.
+          node release/release-manifest.mjs "$VERSION" "$COMMIT" "$ASSET" \
+            0000000000000000000000000000000000000000000000000000000000000000 \
+            "$WINDOWS_ASSET" "$RUNNER_TEMP/probe.json"
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: bin-*
+          path: build
+      - uses: actions/download-artifact@v4
+        with:
+          name: app-stage
+          path: stage
+      - name: Import signing certificate
+        timeout-minutes: 5
+        run: |
+          set -Eeuo pipefail
+          keychain="$RUNNER_TEMP/archigoat-signing.keychain-db"
+          password="$(openssl rand -hex 32)"
+          p12="$RUNNER_TEMP/archigoat.p12"
+          printf '%s' "$MACOS_CERT_P12" | base64 -D > "$p12"
+          security create-keychain -p "$password" "$keychain"
+          # No auto-lock inside a single job run: a locked keychain is what makes codesign block on
+          # a UI prompt. Omitting -l (lock on sleep) and -u (lock after timeout) is what disables it;
+          # passing them with -t 21600 would do the opposite of this comment.
+          security set-keychain-settings "$keychain"
+          security unlock-keychain -p "$password" "$keychain"
+          security list-keychains -d user -s "$keychain"
+          # codesign only: trusting /usr/bin/security here would make the key silently exportable.
+          security import "$p12" -k "$keychain" -P "$MACOS_CERT_PASSWORD" -T /usr/bin/codesign
+          rm -f "$p12"
+          # The partition list is what actually authorizes non-interactive codesign against this key.
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$password" "$keychain" >/dev/null
+          security find-identity -v -p codesigning "$keychain" | grep -F "$MACOS_APP_IDENTITY"
+          echo "ARCHIGOAT_SIGNING_KEYCHAIN=$keychain" >> "$GITHUB_ENV"
+      - name: Merge universal binaries
+        run: |
+          set -Eeuo pipefail
+          chmod +x build/bin-daemon-*/archigoat build/bin-shell-*/archigoat-shell
+          lipo -create \
+            build/bin-daemon-aarch64-apple-darwin/archigoat \
+            build/bin-daemon-x86_64-apple-darwin/archigoat \
+            -output archigoat-universal
+          lipo -create \
+            build/bin-shell-aarch64-apple-darwin/archigoat-shell \
+            build/bin-shell-x86_64-apple-darwin/archigoat-shell \
+            -output archigoat-shell-universal
+      # Four codesign --timestamp round trips to Apple's TSA plus UDZO compression, none of which
+      # have a client-side deadline. Fail fast and visibly instead of hanging to the job timeout.
+      - name: Package and sign DMG
+        timeout-minutes: 10
+        run: release/package-macos.sh archigoat-universal archigoat-shell-universal "$ASSET" "$VERSION" developer-id "$COMMIT" stage
+      # Everything below is Apple's queue. Every other job in this workflow has already finished.
+      - name: Notarize with Apple
+        id: notarize
+        timeout-minutes: 25
+        run: |
+          set -Eeuo pipefail
+          # submit must not abort the step: the submission id and the raw JSON are the only
+          # diagnostics the operator gets, and both have to survive a non-zero exit.
+          set +e
+          xcrun notarytool submit "dist/$ASSET" \
+            --apple-id "$APPLE_ID" --password "$APPLE_APP_PASSWORD" --team-id "$APPLE_TEAM_ID" \
+            --wait --timeout 20m --output-format json > "$RUNNER_TEMP/notarize.json" 2>"$RUNNER_TEMP/notarize.err"
+          submit_status=$?
+          set -e
+          echo "notarytool exit: $submit_status"
+          cat "$RUNNER_TEMP/notarize.err" >&2 || true
+          cat "$RUNNER_TEMP/notarize.json" || true
+          echo
+          read_field() {
+            node -e 'const f=require("node:fs");let o={};try{o=JSON.parse(f.readFileSync(process.argv[1],"utf8"))}catch{}process.stdout.write(String(o[process.argv[2]]??""))' \
+              "$RUNNER_TEMP/notarize.json" "$1"
+          }
+          id="$(read_field id)"
+          status="$(read_field status)"
+          echo "submission=$id" >> "$GITHUB_OUTPUT"
+          echo "notarization submission $id status ${status:-unknown}"
+          [[ "$submit_status" -eq 0 ]]
+          [[ "$status" = "Accepted" ]]
+      - name: Read notarization log
+        if: failure() && steps.notarize.outputs.submission != ''
+        run: xcrun notarytool log "${{ steps.notarize.outputs.submission }}" --apple-id "$APPLE_ID" --password "$APPLE_APP_PASSWORD" --team-id "$APPLE_TEAM_ID"
+      # stapler staple and stapler validate are both unbounded network calls to Apple.
+      - name: Staple ticket
+        timeout-minutes: 10
+        run: |
+          set -Eeuo pipefail
+          xcrun stapler staple "dist/$ASSET"
+          xcrun stapler validate "dist/$ASSET"
+          test -s "dist/$ASSET"
+      # The local artifact is the release truth: mount it only after stapling and prove what users will open.
+      - name: Verify final mounted DMG
+        timeout-minutes: 10
+        run: |
+          set -Eeuo pipefail
+          release/package-macos.sh --verify "dist/$ASSET" "$VERSION" "$COMMIT" "$MACOS_APP_IDENTITY" "$APPLE_TEAM_ID"
+      - name: Build and verify release feed
+        run: |
+          set -Eeuo pipefail
+          macos_sha="$(shasum -a 256 "dist/$ASSET" | cut -d' ' -f1)"
+          node release/release-manifest.mjs "$VERSION" "$COMMIT" "$ASSET" "$macos_sha" "$WINDOWS_ASSET" dist/release.json
+          cat dist/release.json
+      - name: Publish immutable GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -Eeuo pipefail
+          gh release delete "$TAG" --yes >/dev/null 2>&1 || true
+          gh release create "$TAG" "dist/$ASSET" dist/release.json presets.json \
+            --verify-tag --latest --title "ArchiGoat $VERSION" --generate-notes
+      - name: Discard signing keychain
+        if: always()
+        run: |
+          security list-keychains -d user -s login.keychain-db || true
+          security delete-keychain "${ARCHIGOAT_SIGNING_KEYCHAIN:-$RUNNER_TEMP/archigoat-signing.keychain-db}" || true

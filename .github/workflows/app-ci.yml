@@ -1,0 +1,122 @@
+# Build the public daemon on every change; pull requests never receive signing credentials.
+name: ArchiGoat CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: archigoat-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: build-${{ matrix.target }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-14
+            target: x86_64-apple-darwin
+            binary: archigoat
+            shell: true
+          - os: macos-14
+            target: aarch64-apple-darwin
+            binary: archigoat
+            shell: true
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: 1.94.1
+          targets: ${{ matrix.target }}
+      # These caches exist to warm release.yml: Actions caches are ref-scoped, so a tag run can
+      # only restore what main has written. shared-key must match release.yml string-for-string.
+      # save-if main-only: PR-scoped saves are unrestorable by tag runs and would churn the quota.
+      - uses: Swatinem/rust-cache@v2
+        if: runner.os == 'macOS'
+        with:
+          workspaces: daemon
+          shared-key: daemon-${{ matrix.target }}-${{ vars.ARCHIGOAT_ASSET_STEM || 'archigoat' }}
+          cache-all-crates: true
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+      - uses: Swatinem/rust-cache@v2
+        if: runner.os == 'macOS'
+        with:
+          workspaces: shell/src-tauri
+          shared-key: shell-${{ matrix.target }}-${{ vars.ARCHIGOAT_ASSET_STEM || 'archigoat' }}
+          cache-all-crates: true
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+      - run: cargo build --locked --release --manifest-path daemon/Cargo.toml --target ${{ matrix.target }}
+      - uses: actions/setup-node@v4
+        if: matrix.shell
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: shell/package-lock.json
+      - name: Build windowed shell
+        if: matrix.shell
+        run: |
+          npm ci --prefix shell --no-audit --no-fund
+          npm run build --prefix shell
+          cargo build --locked --release --manifest-path shell/src-tauri/Cargo.toml --target ${{ matrix.target }}
+      - name: Prove production shell bridge
+        if: matrix.shell
+        env:
+          ARCHIGOAT_SHELL: shell/src-tauri/target/${{ matrix.target }}/release/archigoat-shell
+        run: node --test test/function/production-shell-contract.mjs
+      - name: Prove sign-in and macOS bundle contracts
+        if: matrix.shell
+        run: node --test test/function/triangoat-sign-in-contract.mjs test/function/macos-bundle-entry-contract.mjs
+      - name: Prove native cleanup
+        if: runner.os == 'macOS'
+        env:
+          ARCHIGOAT_BINARY: daemon/target/${{ matrix.target }}/release/${{ matrix.binary }}
+        run: node --test test/function/native-runner-cleanup.mjs
+      - name: Prove macOS updater mount
+        if: runner.os == 'macOS'
+        run: |
+          rustc --edition=2024 test/function/macos-updater-mount.rs -o "$RUNNER_TEMP/macos-updater-mount"
+          "$RUNNER_TEMP/macos-updater-mount"
+      - name: Prove crash-safe delivery
+        if: runner.os == 'macOS'
+        env:
+          ARCHIGOAT_BINARY: daemon/target/${{ matrix.target }}/release/${{ matrix.binary }}
+        run: node --test test/function/provider-crash-delivery.mjs
+      - name: Prove the daemon's own suite
+        if: runner.os == 'macOS'
+        run: cargo test --locked --manifest-path daemon/Cargo.toml
+      - name: Prove steer envelope
+        if: runner.os == 'macOS'
+        run: |
+          rustc --edition=2024 test/function/steer-envelope.rs -o "$RUNNER_TEMP/steer-envelope"
+          "$RUNNER_TEMP/steer-envelope"
+      - name: Prove finished turns are delivered
+        if: runner.os == 'macOS'
+        run: |
+          rustc --edition=2024 test/function/turn-outcome.rs -o "$RUNNER_TEMP/turn-outcome"
+          "$RUNNER_TEMP/turn-outcome"
+      - name: Prove the product reaches its owner
+        if: runner.os == 'macOS'
+        run: |
+          rustc --edition=2024 test/function/delivery-egress.rs -o "$RUNNER_TEMP/delivery-egress"
+          "$RUNNER_TEMP/delivery-egress"
+      - name: Prove edit stays in place
+        if: runner.os == 'macOS'
+        run: |
+          rustc --edition=2024 test/function/edit-in-place.rs -o "$RUNNER_TEMP/edit-in-place"
+          "$RUNNER_TEMP/edit-in-place"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: unsigned-${{ matrix.target }}
+          path: |
+            daemon/target/${{ matrix.target }}/release/${{ matrix.binary }}
+            shell/src-tauri/target/${{ matrix.target }}/release/archigoat-shell
+          if-no-files-found: error
+          retention-days: 7

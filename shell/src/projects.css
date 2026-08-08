@@ -1,0 +1,43 @@
+.projects { width: min(1180px, calc(100% - 64px)); flex: 1; overflow: auto; margin: 0 auto; padding: 30px 0 30px; }
+.apps-account-head { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 3px 0 24px; border-bottom: 1px solid #e2e8f0; }
+.apps-account { display: flex; align-items: center; gap: 12px; min-width: 0; }
+.apps-avatar { width: 48px; height: 48px; display: grid; place-items: center; flex: none; border-radius: 50%; color: #09203a; background: #e8f1fb; font-size: 20px; font-weight: 780; }
+.apps-email { overflow: hidden; color: #64748b; font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
+.apps-signout { min-height: 31px; padding: 0 11px; border: 1px solid #dbe3ed; border-radius: 7px; color: #475569; background: #fff; font-size: 12px; font-weight: 700; }
+.apps-signout:hover { background: #e8f1fb; }
+.projects-head { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 18px; }
+.projects-head h1 { margin: 0; color: #0f172a; font-size: clamp(22px, 4vw, 30px); letter-spacing: -.045em; }
+.projects-note { display: grid; justify-items: center; gap: 10px; margin: 40px 0; color: #475569; text-align: center; }
+.projects-note p { margin: 0; }
+.projects-retry, .projects-more { min-height: 32px; padding: 0 14px; border: 1px solid #dbe3ed; border-radius: 8px; color: #09203a; background: #fff; font-size: 12px; font-weight: 740; }
+.projects-more { display: block; margin: 18px auto 0; }
+.projects-grid { display: grid; gap: 14px; grid-template-columns: repeat(auto-fill, minmax(268px, 1fr)); margin: 0; padding: 0; list-style: none; }
+.projects-card { overflow: hidden; border: 1px solid #e2e8f0; border-radius: 14px; background: #fff; box-shadow: 0 8px 22px rgba(30, 41, 59, .05); }
+.projects-thumb { height: 168px; overflow: hidden; background: #fff; }
+.projects-thumb img, .projects-thumb video, .projects-thumb iframe { display: block; width: 100%; height: 100%; border: 0; object-fit: cover; background: #fff; pointer-events: none; }
+.projects-file { display: grid; height: 100%; place-items: center; color: #64748b; font-size: 13px; font-weight: 760; letter-spacing: .08em; }
+.projects-progress-thumb { display: grid; place-items: center; align-content: center; gap: 9px; color: #326aa0; background: linear-gradient(145deg, #fff, #e8f1fb); }
+.projects-progress-thumb strong { font-size: 13px; }
+.projects-failed-thumb { color: #9f1239; background: #fff; }
+.progress-ring { width: 34px; height: 34px; border: 3px solid rgba(50, 106, 160, .2); border-top-color: #87b7eb; border-radius: 50%; animation: projects-spin .9s linear infinite; }
+@keyframes projects-spin { to { transform: rotate(360deg); } }
+.projects-body { display: grid; gap: 8px; padding: 12px 13px 13px; }
+.projects-body h2 { margin: 0; overflow: hidden; color: #0f172a; font-size: 14px; font-weight: 700; text-overflow: ellipsis; white-space: nowrap; }
+.projects-inline-name { width: 100%; min-height: 30px; padding: 0 9px; border: 1px solid #6ea5dc; border-radius: 7px; outline: 0; color: #1e293b; background: #fff; font-size: 13px; }
+.projects-tags { display: flex; flex-wrap: wrap; gap: 4px; }
+.projects-tag { padding: 3px 7px; border-radius: 999px; color: #326aa0; background: #e8f1fb; font-size: 10px; line-height: 1.2; }
+.projects-facts { display: flex; flex-wrap: wrap; gap: 4px 10px; margin: 0; color: #64748b; font-size: 11px; }
+.projects-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.projects-actions button { min-height: 29px; padding: 0 10px; border: 1px solid #dbe3ed; border-radius: 7px; color: #475569; background: #fff; font-size: 11px; font-weight: 700; }
+.projects-actions button:hover:not(:disabled) { background: #e8f1fb; }
+.projects-primary { border-color: #87b7eb !important; color: #09203a !important; background: #87b7eb !important; }
+.projects-danger { color: #9f1239 !important; }
+.projects-remote { display: flex; align-items: center; gap: 8px; padding-top: 2px; }
+.projects-remote span { min-width: 0; flex: 1; overflow: hidden; color: #64748b; font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
+.projects-remote button { min-height: 25px; padding: 0 8px; border: 1px solid #dbe3ed; border-radius: 6px; color: #475569; background: #fff; font-size: 11px; }
+.projects-remote button:hover:not(:disabled) { background: #e8f1fb; }
+.projects-error { margin: 0; color: #9f1239; font-size: 11px; }
+
+@media (max-width: 720px) {
+  .projects { width: calc(100% - 24px); padding-top: 22px; }
+}

@@ -1,0 +1,51 @@
+import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
+import test from "node:test";
+
+const root = new URL("../../", import.meta.url);
+const read = (path) => readFile(new URL(path, root), "utf8");
+
+function section(source, start, end) {
+  const match = source.match(new RegExp(`${start}[\\s\\S]*?(?=${end})`));
+  assert.ok(match, `expected ${start} section`);
+  return match[0];
+}
+
+test("creator build phase owns honest active and terminal actions", async () => {
+  const [source, styles] = await Promise.all([
+    read("shell/src/build-preview.tsx"),
+    read("shell/src/build-preview.css"),
+  ]);
+  const build = section(source, "export function BuildScreen", "\\n// Preview");
+
+  assert.match(build, /snapshot\?\.phase === "failed"[\s\S]*snapshot\?\.phase === "stopped"/);
+  assert.match(build, /issue\?\.trim\(\) \|\|/);
+  assert.match(build, /className="build-failure"[\s\S]*role="alert"/);
+  assert.match(build, /className="build-retry"[\s\S]*onClick=\{onRetry\}/);
+  assert.match(build, /className="build-stop"[\s\S]*onClick=\{onStop\}/);
+  assert.doesNotMatch(build, /Preview|Edit|Publish/);
+  assert.match(styles, /\.build-failure\s*\{/);
+  assert.match(styles, /\.build-stop,\s*\.build-retry,\s*\.preview-edit\s*\{/);
+});
+
+test("creator Preview owns Edit and Publish", async () => {
+  const source = await read("shell/src/build-preview.tsx");
+  const preview = section(source, "export function PreviewScreen", "\\n// The conductor");
+
+  assert.match(preview, /className="preview-edit"[\s\S]*onClick=\{onEdit\}/);
+  assert.match(preview, /className="preview-continue"[\s\S]*onClick=\{onContinue\}/);
+  assert.match(preview, />Publish<\/button>/u);
+});
+
+test("creator Chat labels delivered-app edits as builds", async () => {
+  const [source, app] = await Promise.all([
+    read("shell/src/chat.tsx"),
+    read("shell/src/App.tsx"),
+  ]);
+
+  assert.match(source, /editing: boolean;/);
+  assert.match(source, /editing \? "Building…" : "Thinking…"/);
+  assert.match(source, /editing \? "Apply changes" : "Revise brief"/);
+  assert.match(app, /briefDelivered=\{briefReady\.has\(active\) && !briefRunning && !editingDelivered\}/u,
+    "a delivered-app Edit must not keep the initial Build button beside Apply changes");
+});

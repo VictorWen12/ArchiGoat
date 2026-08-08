@@ -1,0 +1,41 @@
+<!-- The signed App identity lets Studio launch local ArchiGoat. -->
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>CFBundleDisplayName</key>
+  <string>ArchiGoat</string>
+  <key>CFBundleExecutable</key>
+  <string>archigoat-shell</string>
+  <key>CFBundleIconFile</key>
+  <string>ArchiGoat.icns</string>
+  <key>CFBundleIdentifier</key>
+  <string>com.archigoat.app</string>
+  <key>CFBundleInfoDictionaryVersion</key>
+  <string>6.0</string>
+  <key>CFBundlePackageType</key>
+  <string>APPL</string>
+  <key>CFBundleShortVersionString</key>
+  <string>1.0.0</string>
+  <key>CFBundleVersion</key>
+  <string>1.0.0</string>
+  <key>ArchiGoatCommit</key>
+  <string>0000000000000000000000000000000000000000</string>
+  <key>LSMinimumSystemVersion</key>
+  <string>12.0</string>
+  <key>NSAppDataUsageDescription</key>
+  <string>ArchiGoat never needs other apps' data. A Work stays inside its own workspace.</string>
+  <key>CFBundleURLTypes</key>
+  <array>
+    <dict>
+      <key>CFBundleURLName</key>
+      <string>com.archigoat.app</string>
+      <key>CFBundleTypeRole</key>
+      <string>Editor</string>
+      <key>CFBundleURLSchemes</key>
+      <array>
+        <string>archigoat</string>
+      </array>
+    </dict>
+  </array>
+</dict>
+</plist>

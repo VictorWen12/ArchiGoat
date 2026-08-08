@@ -1,0 +1,7 @@
+# Deployment owns the loopback listener and physical authorization windows.
+account_url = "https://triangoat.com"
+release_feed_origin = "https://github.com/VictorWen12/ArchiGoat/releases/latest/download"
+artifact_origin = "https://fef7ae3a79ed1810696f2cf70139230f.r2.cloudflarestorage.com"
+bind = "127.0.0.1:17891"
+install_timeout_secs = 300
+cli_dirs = []
