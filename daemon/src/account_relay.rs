@@ -34,7 +34,6 @@ const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
 pub(super) const METADATA_TIMEOUT: Duration = Duration::from_secs(30);
 pub(super) const STREAM_TIMEOUT: Duration = Duration::from_secs(600);
 const MAX_EXECUTORS: usize = 4;
-const MAX_DELIVERIES: usize = 2;
 const MAX_PROGRESS_POSTS: usize = 4;
 
 // MachineName supplies the stable human-visible computer fact Account displays.
@@ -763,7 +762,7 @@ async fn delivery_worker(state: DaemonState, client: Client) {
         tokio::pin!(changed);
         changed.as_mut().enable();
         for (work, _) in state.remote_delivery_candidates() {
-            if deliveries.len() >= MAX_DELIVERIES || !active.insert(work.clone()) {
+            if !active.insert(work.clone()) {
                 continue;
             }
             deliveries.spawn(deliver_work(state.clone(), client.clone(), work));
