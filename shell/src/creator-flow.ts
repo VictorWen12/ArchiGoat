@@ -4,6 +4,7 @@ import { previewUrl as minePreviewUrl, type MineProduct } from "./mine";
 import type { SessionState } from "./projects";
 import {
   finished,
+  type CreatorStatus,
   type Product,
   type RemoteWork,
   type Turn,
@@ -14,6 +15,7 @@ import {
 export type CreatorRun = {
   workId: string;
   deliveryId: string;
+  status: CreatorStatus;
   intent: WorkIntent;
   phase: string;
   awaiting: boolean;
@@ -47,11 +49,6 @@ export function latestProduct(turns: readonly Turn[]): Product | null {
   return null;
 }
 
-export function latestTurnIsBrief(turns: readonly Turn[]): boolean {
-  const turn = turns.at(-1);
-  return !!turn && turn.role === "goat" && (!!turn.product || !!turn.text.trim());
-}
-
 // A finished Work is read from its own delivered turn: a product opens Preview, and words with no
 // product are the Agent's reply, which belongs in the conversation the creator answers in.
 export function deliveredTurn(turns: readonly Turn[]): { product: Product | null; words: string } {
@@ -74,60 +71,49 @@ export function liveWork(
 
 // Work state chooses the only creator surface that can accept the next action.
 export function workSurface(
-  run: Pick<CreatorRun, "intent" | "phase" | "awaiting"> | null,
+  run: Pick<CreatorRun, "status"> | null,
   remote: RemoteWork | null,
 ): "chat" | "build" {
-  if (remote?.intent === "build") return "build";
-  // A turn the Agent parked on the creator is the creator's turn again: it belongs in the conversation.
-  if (run?.awaiting && !finished(run.phase)) return "chat";
-  if (run?.intent === "build" && !finished(run.phase)) return "build";
-  return "chat";
+  return (remote?.status ?? run?.status) === "building" ? "build" : "chat";
 }
 
 export function runBuildState(run: CreatorRun): BuildState {
   return {
-    phase: run.phase,
+    status: run.status,
     startedAt: run.startedAt,
     typicalMs: run.typicalMs,
-    awaiting: run.awaiting,
-    words: run.text,
   };
 }
 
-// The Agent's own stage events say when a turn stopped shaping the design and started making the app.
-function makingApp(events: readonly WorkEvent[]): boolean {
-  for (let index = events.length - 1; index >= 0; index -= 1) {
-    const event = events[index];
-    if (event.kind !== "stage") continue;
-    return event.label === "Building" || event.label === "Verifying" || event.label === "Delivering";
+// Account status.rs supplies the status; this function only supplies its visible sentence.
+export function workStage(status: CreatorStatus): Pick<SessionState, "stage" | "detail"> {
+  switch (status) {
+    case "designing": return { stage: status, detail: "Designing…" };
+    case "ready_to_build": return { stage: status, detail: "Ready to build" };
+    case "building": return { stage: status, detail: "Building…" };
+    case "failed": return { stage: status, detail: "Needs attention" };
+    case "stopped": return { stage: status, detail: "Stopped" };
+    case "preview": return { stage: status, detail: "Preview ready" };
+    case "published": return { stage: status, detail: "Published" };
   }
-  return false;
-}
-
-// Every status word the creator reads comes from Work truth: whether the turn ended, whether the
-// Agent parked it on the creator, and the last stage the Agent itself published.
-export function workStage(phase: string, awaiting: boolean, events: readonly WorkEvent[]): Pick<SessionState, "stage" | "detail"> {
-  if (phase === "failed" || phase === "stopped") return { stage: "failed", detail: "Needs attention" };
-  if (awaiting) return { stage: "waiting", detail: "Needs your answer" };
-  return makingApp(events) ? { stage: "building", detail: "Building…" } : { stage: "designing", detail: "Designing…" };
 }
 
 export function creatorSessionStates(
   runs: ReadonlyMap<string, CreatorRun>,
   remote: ReadonlyMap<string, RemoteWork>,
-  ready: ReadonlySet<string>,
+  known: ReadonlyMap<string, CreatorStatus>,
 ): Map<string, SessionState> {
   const states = new Map<string, SessionState>();
+  for (const [session, status] of known) {
+    if (status !== "preview" && status !== "published") states.set(session, { ...workStage(status), remote: null });
+  }
   for (const [session, run] of runs) {
-    states.set(session, { ...workStage(run.phase, run.awaiting, run.events), remote: null });
+    states.set(session, { ...workStage(run.status), remote: null });
   }
   for (const [session, work] of remote) {
-    const state = workStage(work.state, work.awaiting, work.events);
+    const state = workStage(work.status);
     // Only the other computer can say why its Work failed, so its own reason wins that one word.
     states.set(session, { ...state, detail: state.stage === "failed" ? (work.reason || state.detail) : state.detail, remote: work });
-  }
-  for (const session of ready) {
-    if (!states.has(session)) states.set(session, { stage: "designing", detail: "Ready to build", remote: null });
   }
   return states;
 }

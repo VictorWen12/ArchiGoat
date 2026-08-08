@@ -1,11 +1,10 @@
 import { useEffect, useRef, useState } from "react";
-import { type Product, type WorkSnapshot } from "./transport";
+import { type CreatorStatus, type Product } from "./transport";
 import { bindProductFrame, productRuntimeName } from "./parent-bridge";
 import "./build-preview.css";
 
-// The wait shows only Work truth: when it started, how long one typically takes, whether the Agent
-// parked this turn on the creator, and the words it said. A Work watched from another computer has fewer.
-export type BuildState = Pick<WorkSnapshot, "phase"> & { startedAt?: number; typicalMs?: number | null; awaiting?: boolean; words?: string };
+// Account status.rs owns creator status. This leaf only renders its timing facts.
+export type BuildState = { status: CreatorStatus; startedAt?: number; typicalMs?: number | null };
 
 export type BuildScreenProps = {
   brief?: string;
@@ -55,20 +54,17 @@ function useElapsed(startedAt: number | undefined, running: boolean): number | n
 
 // Build keeps backstage Work details out of the creator surface: one line, the clock, and the bar.
 export function BuildScreen({ snapshot, issue, onStop, onRetry }: BuildScreenProps) {
-  const terminal = snapshot?.phase === "failed" || snapshot?.phase === "stopped";
-  const stopped = snapshot?.phase === "stopped";
+  const terminal = snapshot?.status === "failed" || snapshot?.status === "stopped";
+  const stopped = snapshot?.status === "stopped";
   const failure = issue?.trim() || (stopped ? "The build was stopped." : "The build could not finish.");
-  // A parked turn says what the Agent asked instead of pretending the app is still being made.
-  const parked = !terminal && snapshot?.awaiting === true;
-  const line = parked ? snapshot?.words?.trim() ?? "" : BUILD_LINE;
   const elapsed = useElapsed(snapshot?.startedAt, !terminal);
   const typical = snapshot?.typicalMs && snapshot.typicalMs > 0 ? snapshot.typicalMs : null;
   // Past the typical the bar holds just short of full and the clock keeps counting, so a long build never reads as finished.
   const fill = elapsed !== null && typical ? 6 + Math.min(elapsed / typical, 1) * 91 : null;
 
-  return <main className="build-preview-screen build-screen" aria-label="Build" data-phase={snapshot?.phase ?? "starting"}>
+  return <main className="build-preview-screen build-screen" aria-label="Build" data-status={snapshot?.status ?? "starting"}>
     <div className="build-shell">
-      <h1>{terminal ? (stopped ? "Build stopped" : "Build failed") : parked ? "The Agent needs your answer" : "Building…"}</h1>
+      <h1>{terminal ? (stopped ? "Build stopped" : "Build failed") : snapshot ? "Building…" : "Starting build…"}</h1>
       {terminal
         ? <>
             <p className="build-failure" role="alert">{failure}</p>
@@ -77,7 +73,7 @@ export function BuildScreen({ snapshot, issue, onStop, onRetry }: BuildScreenPro
             </div>
           </>
         : <>
-            {line && <p className="build-line">{line}</p>}
+            <p className="build-line">{BUILD_LINE}</p>
             {elapsed !== null && <p className="build-clock">
               <span className="build-elapsed">{clock(elapsed)}</span>
               {typical !== null && <span className="build-typical">typical {clock(typical)}</span>}

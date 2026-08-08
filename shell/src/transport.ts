@@ -10,6 +10,8 @@ export type Turn = { id: number; role: "me" | "goat"; text: string; at: number; 
 export type ProductFile = { id: string; path: string; form: string; size: number; sha256: string };
 export type Product = { id: string; name: string; description: string; tags: string[]; form: string; size: number; previewKind: "image" | "video" | "html" | "pdf" | "text" | null; published: boolean; files: ProductFile[] };
 export type WorkIntent = "brief" | "build";
+// Account's status.rs owns this wire vocabulary; the shell only validates and displays it.
+export type CreatorStatus = "designing" | "ready_to_build" | "building" | "preview" | "published" | "failed" | "stopped";
 export type PublishMetadata = { id: string; name: string; description: string; tags: string[] };
 export type WorkProgress = { sequence: number; text: string };
 export type WorkContext = { author: string; source: string; provenance: "user" | "agent" | "external"; text: string; attachments: string[] };
@@ -25,12 +27,12 @@ export type WorkEvent =
   | { seq: number; at: string; kind: "turn_boundary"; reason: string; elapsed_seconds: number };
 export type WorkSnapshot = { phase: string; awaiting: boolean; text: string; events: WorkEvent[]; startedAt: number; progress?: WorkProgress; tokens?: number; model?: string; kind?: "answer" | "artifact"; run?: string; files: WorkFile[] };
 export type PendingSummon = { deliveryId: string; workId: string; scopeId: string; goal: string; computer: string | null; intent: WorkIntent };
-export type RemoteWork = { workId: string; computer: string; state: string; availability: string; live: boolean; progress: string; reason: string; events: WorkEvent[]; text: string; awaiting: boolean; intent: WorkIntent };
+export type RemoteWork = { workId: string; computer: string; status: CreatorStatus; state: string; availability: string; live: boolean; progress: string; reason: string; events: WorkEvent[]; text: string; awaiting: boolean; intent: WorkIntent };
 export type InputReceipt = { session: string; nonce: string; id: string; name: string; media: string; bytes: number; sha256: string; proof?: string };
 // TypicalMs is the account's one measured median over recently finished builds, so every creator reads
 // the same number; it is null until enough builds have finished to measure one. Only the account can
 // know it — this computer alone has no such history, and a per-computer figure would be a different fact.
-export type WorkStatus = { deliveryId: string; workId: string; phase: string; typicalMs: number | null };
+export type WorkStatus = { deliveryId: string; workId: string; status: CreatorStatus; typicalMs: number | null };
 export type AgentModel = { id: string; label: string };
 export type AgentTier = { model?: string; effort?: string };
 export type AgentPresets = { best: AgentTier; fast: AgentTier };
@@ -136,6 +138,9 @@ async function nativeRequest(command: "account_request" | "loopback_request", in
 const validToken = (value: unknown): value is string => typeof value === "string" && /^[0-9a-f]{64}$/.test(value);
 const validVoucher = (value: unknown): value is string => typeof value === "string" && value.length <= 1024 && /^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/.test(value);
 const text = (value: unknown): value is string => typeof value === "string";
+const creatorStatus = (value: unknown): value is CreatorStatus =>
+  value === "designing" || value === "ready_to_build" || value === "building"
+  || value === "preview" || value === "published" || value === "failed" || value === "stopped";
 const nonnegative = (value: unknown): value is number => Number.isSafeInteger(value) && (value as number) >= 0;
 const validTags = (value: unknown): value is string[] => Array.isArray(value) && value.every((tag) => text(tag) && !!tag.trim() && !/[\u0000-\u001f\u007f]/.test(tag));
 
@@ -446,36 +451,38 @@ export async function fetchTurns(session: string): Promise<Turn[]> {
     : turn);
 }
 
-export async function appendTurn(session: string, textValue: string, attachments: string[], intent: WorkIntent): Promise<{ id: number; at: number; deliveryId: string; workId: string; pending: PendingWork; created: boolean }> {
+export async function appendTurn(session: string, textValue: string, attachments: string[], intent: WorkIntent): Promise<{ id: number; at: number; deliveryId: string; workId: string; status: "designing"; pending: PendingWork; created: boolean }> {
   const response = await accountRequest("/auth/goat/append", {
     method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ session, role: "me", text: textValue, attachments, intent }),
   });
-  const value = await json<{ id?: unknown; at?: unknown; deliveryId?: unknown; workId?: unknown; pending?: unknown }>(response);
+  const value = await json<{ id?: unknown; at?: unknown; deliveryId?: unknown; workId?: unknown; status?: unknown; pending?: unknown }>(response);
   if (!Number.isSafeInteger(value.id) || !Number.isSafeInteger(value.at) || !text(value.deliveryId) || !value.deliveryId || !text(value.workId) || !value.workId) {
     throw new BridgeError(0, "TrianGoat did not accept this idea.");
   }
+  if (value.status !== "designing") throw new BridgeError(0, "TrianGoat returned invalid Creator status.");
   return {
     id: value.id as number,
     at: value.at as number,
     deliveryId: value.deliveryId,
     workId: value.workId,
+    status: value.status,
     pending: fetchPendingWork(value.pending, value.deliveryId, value.workId, session),
     created: response.status === 201,
   };
 }
 
-export async function steerTurn(session: string, workId: string, textValue: string, attachments: string[], computer?: string): Promise<{ id: number; at: number; deliveryId: string; workId: string; computer: string | null }> {
+export async function steerTurn(session: string, workId: string, textValue: string, attachments: string[], computer?: string): Promise<{ id: number; at: number; deliveryId: string; workId: string; computer: string | null; status: "building" }> {
   const response = await accountRequest("/auth/goat/steer", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ session, workId, text: textValue, attachments, ...(computer ? { computer } : {}) }),
   });
-  const value = await json<{ id?: unknown; at?: unknown; deliveryId?: unknown; workId?: unknown; computer?: unknown }>(response);
+  const value = await json<{ id?: unknown; at?: unknown; deliveryId?: unknown; workId?: unknown; computer?: unknown; status?: unknown }>(response);
   if (!Number.isSafeInteger(value.id) || !Number.isSafeInteger(value.at) || !text(value.deliveryId) || !value.deliveryId
-    || value.workId !== workId || (value.computer !== null && !text(value.computer))) {
+    || value.workId !== workId || (value.computer !== null && !text(value.computer)) || value.status !== "building") {
     throw new BridgeError(0, "TrianGoat did not continue this Work.");
   }
-  return { id: value.id as number, at: value.at as number, deliveryId: value.deliveryId, workId, computer: value.computer };
+  return { id: value.id as number, at: value.at as number, deliveryId: value.deliveryId, workId, computer: value.computer, status: value.status };
 }
 
 export async function removeSession(session: string): Promise<void> {
@@ -615,7 +622,7 @@ export async function waitForWork(workId: string, onSnapshot: (snapshot: WorkSna
 export async function workStatus(deliveryId: string): Promise<WorkStatus | null> {
   try {
     const value = await json<Partial<WorkStatus>>(await accountRequest(`/auth/work/status?delivery=${encodeURIComponent(deliveryId)}`));
-    if (!text(value.deliveryId) || !text(value.workId) || !text(value.phase)) throw new BridgeError(0, "TrianGoat returned invalid delivery status.");
+    if (!text(value.deliveryId) || !text(value.workId) || !creatorStatus(value.status)) throw new BridgeError(0, "TrianGoat returned invalid delivery status.");
     // No measured typical yet is simply no typical; the wait still shows its line and its clock.
     const typicalMs = Number.isSafeInteger(value.typicalMs) && (value.typicalMs as number) > 0 ? (value.typicalMs as number) : null;
     return { ...(value as WorkStatus), typicalMs };
@@ -645,7 +652,7 @@ export async function pendingWorks(): Promise<PendingSummon[]> {
 }
 
 // A Work this computer did not start still shows its own state, in the account's words.
-export async function remoteWork(workId: string, intent: WorkIntent = "build"): Promise<RemoteWork | null> {
+export async function remoteWork(workId: string, status: CreatorStatus, intent: WorkIntent = "build"): Promise<RemoteWork | null> {
   try {
     const value = await json<Record<string, unknown>>(await accountRequest(`/auth/remote/work?work=${encodeURIComponent(workId)}`));
     if (!text(value.workId) || !text(value.computer) || !text(value.state) || !text(value.availability)) throw new BridgeError(0, "TrianGoat returned invalid remote Work status.");
@@ -656,7 +663,7 @@ export async function remoteWork(workId: string, intent: WorkIntent = "build"): 
     const answer = snapshot && typeof snapshot === "object" && text(snapshot.text) ? snapshot.text : "";
     // Awaiting is the other computer's own signal that its Agent parked this turn on the creator.
     const awaiting = !!snapshot && typeof snapshot === "object" && snapshot.awaiting === true;
-    return { workId: value.workId, computer: value.computer, state: value.state, availability: value.availability, live: value.live === true, progress, reason: text(value.reason) ? value.reason : "", events, text: answer, awaiting, intent };
+    return { workId: value.workId, computer: value.computer, status, state: value.state, availability: value.availability, live: value.live === true, progress, reason: text(value.reason) ? value.reason : "", events, text: answer, awaiting, intent };
   } catch (error) {
     if (error instanceof BridgeError && error.status === 404) return null;
     throw error;

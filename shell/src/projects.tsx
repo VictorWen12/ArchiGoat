@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { deleteProduct, type RemoteWork, type Session } from "./transport";
+import { deleteProduct, type CreatorStatus, type RemoteWork, type Session } from "./transport";
 import { fetchMine, previewUrl, renameProduct, type MineProduct, type MinePage } from "./mine";
 import "./projects.css";
 
@@ -7,7 +7,7 @@ const NEW_APP = "New App";
 
 // The conductor supplies the server/runtime truth for one unfinished session.
 export type SessionState = {
-  stage: "designing" | "building" | "waiting" | "failed";
+  stage: CreatorStatus;
   detail: string;
   remote: RemoteWork | null;
 };
@@ -148,7 +148,7 @@ function InProgressRow({ session, state, onEdit, onRename, onDelete, onStopRemot
   }
 
   return <li className="projects-card projects-in-progress">
-    <div className={`projects-thumb projects-progress-thumb${state.stage === "failed" ? " projects-failed-thumb" : ""}`}>
+    <div className={`projects-thumb projects-progress-thumb${state.stage === "failed" || state.stage === "stopped" ? " projects-failed-thumb" : ""}`}>
       {(state.stage === "designing" || state.stage === "building") && <span className="progress-ring" aria-hidden="true" />}
       <strong>{label}</strong>
     </div>
@@ -253,9 +253,12 @@ function usePreview(product: MineProduct | null): string | null {
 function stateLabel(stage: SessionState["stage"]): string {
   switch (stage) {
     case "designing": return "Designing…";
+    case "ready_to_build": return "Ready to build";
     case "building": return "Building…";
-    case "waiting": return "Needs your answer";
     case "failed": return "Needs attention";
+    case "stopped": return "Stopped";
+    case "preview": return "Preview ready";
+    case "published": return "Published";
   }
 }
 

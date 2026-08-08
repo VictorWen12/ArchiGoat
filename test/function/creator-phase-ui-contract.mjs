@@ -18,7 +18,8 @@ test("creator build phase owns honest active and terminal actions", async () => 
   ]);
   const build = section(source, "export function BuildScreen", "\\n// Preview");
 
-  assert.match(build, /snapshot\?\.phase === "failed"[\s\S]*snapshot\?\.phase === "stopped"/);
+  assert.match(build, /snapshot\?\.status === "failed"[\s\S]*snapshot\?\.status === "stopped"/);
+  assert.doesNotMatch(build, /snapshot\?\.phase|snapshot\?\.awaiting|needs your answer/i);
   assert.match(build, /issue\?\.trim\(\) \|\|/);
   assert.match(build, /className="build-failure"[\s\S]*role="alert"/);
   assert.match(build, /className="build-retry"[\s\S]*onClick=\{onRetry\}/);
@@ -46,6 +47,4 @@ test("creator Chat labels delivered-app edits as builds", async () => {
   assert.match(source, /editing: boolean;/);
   assert.match(source, /editing \? "Building…" : "Thinking…"/);
   assert.match(source, /editing \? "Apply changes" : "Revise brief"/);
-  assert.match(app, /briefDelivered=\{briefReady\.has\(active\) && !briefRunning && !editingDelivered\}/u,
-    "a delivered-app Edit must not keep the initial Build button beside Apply changes");
 });

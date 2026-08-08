@@ -33,6 +33,7 @@ import {
   type AgentModel,
   type AgentPresets,
   type Attachment,
+  type CreatorStatus,
   type RemoteWork,
   type Session,
   type Turn,
@@ -51,7 +52,6 @@ import {
   deliveredTurn,
   latestBrief,
   latestProduct,
-  latestTurnIsBrief,
   liveWork,
   previewLeaf,
   runBuildState,
@@ -128,7 +128,7 @@ export function App() {
   const [submitting, setSubmitting] = useState(false);
   const [runs, setRuns] = useState<Map<string, CreatorRun>>(() => new Map());
   const [remote, setRemote] = useState<Map<string, RemoteWork>>(() => new Map());
-  const [briefReady, setBriefReady] = useState<Set<string>>(() => new Set());
+  const [creatorStatuses, setCreatorStatuses] = useState<Map<string, CreatorStatus>>(() => new Map());
   const [briefs, setBriefs] = useState<Map<string, string>>(() => new Map());
   const [previewTarget, setPreviewTarget] = useState<PreviewTarget | null>(null);
   const [agent, setAgent] = useState<Agent | null>(null);
@@ -147,9 +147,7 @@ export function App() {
   const run = active ? runs.get(active) ?? null : null;
   const activeRemote = active ? remote.get(active) ?? null : null;
   const busy = [...runs.values()].some((item) => !finished(item.phase));
-  // A turn the Agent parked on the creator is the creator's turn again, wherever the screen is.
-  const parked = !!run && run.awaiting && !finished(run.phase);
-  const sessionStates = useMemo(() => creatorSessionStates(runs, remote, briefReady), [briefReady, remote, runs]);
+  const sessionStates = useMemo(() => creatorSessionStates(runs, remote, creatorStatuses), [creatorStatuses, remote, runs]);
   const preview = usePreviewTarget(previewTarget);
   const activeBrief = active ? briefs.get(active) ?? latestBrief(turns) : "";
   const editingDelivered = !!latestProduct(turns) || (!!active && previewTarget?.session === active && previewTarget.source === "mine");
@@ -188,13 +186,8 @@ export function App() {
   useEffect(() => { remoteRef.current = remote; }, [remote]);
 
   useEffect(() => {
-    if (active && (view === "chat" || view === "preview" || view === "publish") && remote.get(active)?.intent === "build") setView("build");
+    if (active && (view === "chat" || view === "preview" || view === "publish") && remote.get(active)?.status === "building") setView("build");
   }, [active, remote, view]);
-
-  // The Agent parking a turn on the creator moves the screen to the conversation it is answered in.
-  useEffect(() => {
-    if (active && view === "build" && parked) setView("chat");
-  }, [active, parked, view]);
 
   useEffect(() => {
     let alive = true;
@@ -221,22 +214,27 @@ export function App() {
       void Promise.all(nextSessions.map(async (session) => {
         try { return [session.id, await fetchTurns(session.id)] as const; }
         catch { return null; }
-      })).then((rows) => {
+      })).then(async (rows) => {
         if (!alive) return;
         const nextThreads = new Map<string, Turn[]>();
         const nextBriefs = new Map<string, string>();
-        const nextReady = new Set<string>();
+        const nextStatuses = new Map<string, CreatorStatus>();
         for (const row of rows) {
           if (!row) continue;
           const [session, list] = row;
           nextThreads.set(session, list);
           const brief = latestBrief(list);
           if (brief) nextBriefs.set(session, brief);
-          if (latestTurnIsBrief(list)) nextReady.add(session);
+          const lifecycle = latestLifecycle(list);
+          if (lifecycle) {
+            const status = await workStatus(lifecycle.deliveryId).catch(() => null);
+            if (status) nextStatuses.set(session, status.status);
+          }
         }
+        if (!alive) return;
         setThreads(nextThreads);
         setBriefs(nextBriefs);
-        setBriefReady(nextReady);
+        setCreatorStatuses(nextStatuses);
       });
     }).catch((reason) => { if (alive) setError(messageOf(reason, "Could not load your apps")); });
     return () => { alive = false; };
@@ -301,7 +299,10 @@ export function App() {
       const next = new Map<string, RemoteWork>();
       for (const summon of summons) {
         if (!summon.computer || owed[summon.scopeId]) continue;
-        const state = await remoteWork(summon.workId, summon.intent).catch(() => null);
+        const status = await workStatus(summon.deliveryId).catch(() => null);
+        if (!status) continue;
+        putCreatorStatus(summon.scopeId, status.status);
+        const state = await remoteWork(summon.workId, status.status, summon.intent).catch(() => null);
         if (state?.state === "delivered") continue;
         if (state) next.set(summon.scopeId, state);
       }
@@ -357,6 +358,10 @@ export function App() {
     setRuns((current) => new Map(current).set(session, value));
   }
 
+  function putCreatorStatus(session: string, status: CreatorStatus): void {
+    setCreatorStatuses((current) => new Map(current).set(session, status));
+  }
+
   function patchRun(session: string, change: (value: CreatorRun) => CreatorRun): void {
     setRuns((current) => {
       const value = current.get(session);
@@ -377,7 +382,6 @@ export function App() {
   // Words with no product are the Agent's reply: the conversation keeps them and Build stays offered.
   function landWords(session: string, words: string): void {
     if (words) setBriefs((current) => new Map(current).set(session, words));
-    setBriefReady((current) => new Set(current).add(session));
   }
 
   // Every title on screen is the server's; this computer creates the thread and then reads it back.
@@ -456,7 +460,7 @@ export function App() {
       dropRun(id);
       setThreads((current) => { const next = new Map(current); next.delete(id); return next; });
       setBriefs((current) => { const next = new Map(current); next.delete(id); return next; });
-      setBriefReady((current) => { const next = new Set(current); next.delete(id); return next; });
+      setCreatorStatuses((current) => { const next = new Map(current); next.delete(id); return next; });
       setSessions((current) => current.filter((session) => session.id !== id));
       setActive((current) => current === id ? null : current);
       setPreviewTarget((current) => current?.session === id ? null : current);
@@ -474,7 +478,10 @@ export function App() {
     setError("");
     try {
       await stopRemoteWork(work.computer, work.workId);
-      const next = await remoteWork(work.workId, work.intent);
+      const lifecycle = latestLifecycle(threads.get(session) ?? []);
+      const status = lifecycle ? await workStatus(lifecycle.deliveryId) : null;
+      const next = status ? await remoteWork(work.workId, status.status, work.intent) : null;
+      if (status) putCreatorStatus(session, status.status);
       if (next) setRemote((current) => new Map(current).set(session, next));
     }
     catch (reason) { setError(messageOf(reason, "Could not stop this Work")); }
@@ -513,13 +520,15 @@ export function App() {
   async function resume(session: string, owed: OwedWork, controller: AbortController): Promise<void> {
     try {
       const status = await workStatus(owed.deliveryId);
-      const snapshot = !status || status.phase === "delivered" ? null : await readWork(owed.workId);
+      if (!status) { rememberWork(session, null); return; }
+      putCreatorStatus(session, status.status);
+      const snapshot = status.status === "preview" || status.status === "published" ? null : await readWork(owed.workId);
       if (!snapshot) { rememberWork(session, null); return; }
       const list = await fetchTurns(session);
       if (controller.signal.aborted) return;
       putTurns(session, list);
       putRun(session, {
-        workId: owed.workId, deliveryId: owed.deliveryId, intent: owed.intent, phase: snapshot.phase, awaiting: snapshot.awaiting, text: snapshot.text, events: snapshot.events,
+        workId: owed.workId, deliveryId: owed.deliveryId, status: status.status, intent: owed.intent, phase: snapshot.phase, awaiting: snapshot.awaiting, text: snapshot.text, events: snapshot.events,
         startedAt: snapshot.startedAt, typicalMs: status?.typicalMs ?? null, model: snapshot.model, tokens: snapshot.tokens,
         controller,
       });
@@ -539,6 +548,8 @@ export function App() {
     if (result.phase === "done") {
       // The delivery stays owed until it lands, so a dropped connection hands the finished result to the next launch.
       await deliverLocalWork(session, deliveryId, workId);
+      const accountStatus = await workStatus(deliveryId);
+      if (accountStatus) putCreatorStatus(session, accountStatus.status);
       rememberWork(session, null);
       dropRun(session);
       const list = await fetchTurns(session);
@@ -634,17 +645,14 @@ export function App() {
     const attached = selected.map((item) => item.attachment);
     setDraft("");
     setFiles([]);
-    setBriefReady((current) => {
-      const next = new Set(current);
-      next.delete(session);
-      return next;
-    });
     setView(intent === "brief" ? "chat" : "build");
     const saved = await appendTurn(session, textValue.trim(), attachmentIds, intent);
+    putCreatorStatus(session, saved.status);
     if (!saved.created) {
       putTurns(session, await fetchTurns(session));
       await refreshSessions();
-      const existing = saved.pending.computer ? await remoteWork(saved.workId, intent) : null;
+      const existingStatus = await workStatus(saved.deliveryId);
+      const existing = saved.pending.computer && existingStatus ? await remoteWork(saved.workId, existingStatus.status, intent) : null;
       if (existing) {
         const next = new Map(remoteRef.current).set(session, existing);
         remoteRef.current = next;
@@ -662,7 +670,8 @@ export function App() {
     const controller = new AbortController();
     putRun(session, {
       workId: saved.workId, deliveryId: saved.deliveryId, intent, phase: "queued", awaiting: false, text: "", events: [],
-      startedAt: Date.now(), typicalMs: null, controller,
+      status: saved.status,
+      startedAt: saved.at * 1_000, typicalMs: null, controller,
     });
     try {
       await agentHealth();
@@ -694,10 +703,10 @@ export function App() {
     await refreshSessions();
     setDraft("");
     setFiles([]);
-    setBriefReady((current) => { const next = new Set(current); next.delete(session); return next; });
     setView(intent === "brief" ? "chat" : "build");
+    putCreatorStatus(session, saved.status);
     if (saved.computer) {
-      const nextWork = await remoteWork(saved.workId, intent);
+      const nextWork = await remoteWork(saved.workId, saved.status, intent);
       if (nextWork) {
         const next = new Map(remoteRef.current).set(session, nextWork);
         remoteRef.current = next;
@@ -710,11 +719,11 @@ export function App() {
     const controller = local?.controller ?? new AbortController();
     rememberWork(session, { deliveryId: saved.deliveryId, workId: saved.workId, intent });
     if (local) {
-      patchRun(session, (value) => ({ ...value, intent, phase: "running", awaiting: false, text: "", startedAt: Date.now() }));
+      patchRun(session, (value) => ({ ...value, status: saved.status, intent, phase: "running", awaiting: false, text: "", startedAt: saved.at * 1_000 }));
     } else {
       putRun(session, {
         workId: saved.workId, deliveryId: saved.deliveryId, intent, phase: "queued", awaiting: false, text: "", events: [],
-        startedAt: Date.now(), typicalMs: null, controller,
+        status: saved.status, startedAt: saved.at * 1_000, typicalMs: null, controller,
       });
     }
     try {
@@ -756,19 +765,15 @@ export function App() {
   }
 
   const previewProductForView = previewTarget ? previewLeaf(previewTarget, preview) : null;
-  // A parked turn holds nothing open: the composer answers it instead of waiting on the Agent.
-  const briefRunning = !!run && run.intent === "brief" && !finished(run.phase) && !parked;
-  const remoteBriefRunning = activeRemote?.intent === "brief";
-  const buildRunning = ((!!run && run.intent === "build" && !finished(run.phase)) || activeRemote?.intent === "build") && !parked;
-  const liveStage = run && !finished(run.phase)
-    ? workStage(run.phase, run.awaiting, run.events)
-    : activeRemote
-      ? workStage(activeRemote.state, activeRemote.awaiting, activeRemote.events)
-      : null;
-  const buildSnapshot = run?.intent === "build"
+  const activeStatus = activeRemote?.status ?? run?.status ?? (active ? creatorStatuses.get(active) : undefined);
+  const briefRunning = activeStatus === "designing" && !!run && !finished(run.phase);
+  const remoteBriefRunning = activeStatus === "designing" && !!activeRemote;
+  const buildRunning = activeStatus === "building";
+  const liveStage = activeStatus ? workStage(activeStatus) : null;
+  const buildSnapshot = activeStatus === "building" && run
     ? runBuildState(run)
-    : activeRemote?.intent === "build"
-      ? { phase: activeRemote.state === "failed" ? "failed" : "running", awaiting: activeRemote.awaiting, words: activeRemote.text }
+    : activeStatus === "building" && activeRemote
+      ? { status: activeRemote.status }
       : null;
 
   return (
@@ -818,7 +823,7 @@ export function App() {
                   messages={chatMessages}
                   value={draft}
                   attachments={creatorAttachments}
-                  briefDelivered={briefReady.has(active) && !briefRunning && !editingDelivered}
+                  briefDelivered={activeStatus === "ready_to_build" && !editingDelivered}
                   editing={editingDelivered}
                   busy={submitting || briefRunning || remoteBriefRunning}
                   building={buildRunning}

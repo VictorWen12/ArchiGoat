@@ -52,8 +52,6 @@ test("creator bridge carries intent, publish metadata, and one-screen routing", 
     "generated artifact tags must enter Publish as valid #tags");
   assert.match(publish, /tags\.push\(`#\$\{name\}`\)/u,
     "AG must send the app-owned #tag contract consumed by TG");
-  assert.match(creatorFlow, /return !!turn && turn\.role === "goat" && \(!!turn\.product \|\| !!turn\.text\.trim\(\)\);/u,
-    "editing a delivered product must keep Build available in the same session");
 });
 
 test("creator edit has one local or phone-owned Work owner", async () => {
@@ -64,8 +62,6 @@ test("creator edit has one local or phone-owned Work owner", async () => {
 
   assert.match(creatorFlow, /export function liveWork\([\s\S]*?return \(!!run && !finished\(run\.phase\)\) \|\| remote !== null;/u,
     "every pending remote Work must own the session, including queued and unreachable states");
-  assert.match(creatorFlow, /export function workSurface\([\s\S]*?if \(remote\?\.intent === "build"\) return "build";[\s\S]*?return "chat";/u,
-    "only a phone Build may open Building; a phone Framework turn stays in Chat");
   assert.match(app, /function openWork\(session: string\): void \{[\s\S]*?setView\(workSurface\(runs\.get\(session\) \?\? null, remote\.get\(session\) \?\? null\)\);/u,
     "Preview to Edit must return to the same session's Chat unless it is still Building");
   assert.match(app, /function tryProduct\(product: MineProduct\): void \{[\s\S]*?if \(product\.sessionId && liveWork\([\s\S]*?setView\(workSurface\(/u,
@@ -83,13 +79,11 @@ test("creator edit has one local or phone-owned Work owner", async () => {
   const follower = app.match(/if \(!saved\.created\) \{([\s\S]*?)\n    \}\n    putTurns/u)?.[1] ?? "";
   assert.match(follower, /fetchTurns\(session\)/u,
     "a converged follower must adopt the canonical Account turn");
-  assert.match(follower, /saved\.pending\.computer[\s\S]*?remoteWork\(saved\.workId, intent\)/u,
-    "a phone-owned follower must immediately adopt the existing remote Work");
   assert.doesNotMatch(follower, /startWork|stagePendingInput/u,
     "a 200 follower must never stage or start the first writer's Work");
   assert.match(app, /state\?\.state === "delivered"[\s\S]*?const completed = \[\.\.\.remoteRef\.current\.keys\(\)\]\.filter\(\(session\) => !next\.has\(session\)\);[\s\S]*?adoptRemoteDelivery\(session\)/u,
     "a checkpointed phone Work must leave Building without pretending the Work ended");
-  assert.match(app, /\(view === "chat" \|\| view === "preview" \|\| view === "publish"\)[\s\S]*?remote\.get\(active\)\?\.intent === "build"[\s\S]*?setView\("build"\)/u,
+  assert.match(app, /\(view === "chat" \|\| view === "preview" \|\| view === "publish"\)[\s\S]*?remote\.get\(active\)\?\.status === "building"[\s\S]*?setView\("build"\)/u,
     "a phone Edit must replace every open creator phase, including Publish, with Building");
   assert.match(app, /async function adoptRemoteDelivery\(session: string\)[\s\S]*?fetchTurns\(session\)[\s\S]*?setPreviewTarget\([\s\S]*?setView\("preview"\)/u,
     "remote delivery must refresh the same session and open its replacement Preview");
