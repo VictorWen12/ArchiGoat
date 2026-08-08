@@ -240,7 +240,7 @@ test("online removal adopts the old identity, retires the App, then keeps delive
   assert.equal(requests[0].headers.authorization, `Bearer ${credential}`);
   assert.equal(requests[0].headers["x-app-device"], device);
   assert.match(requests[0].headers["x-app-instance"], /^[0-9a-f]{64}$/);
-  assert.equal(requests[0].headers["x-app-protocol"], "15");
+  assert.equal(requests[0].headers["x-app-protocol"], "16");
   assert.equal(await stat(legacyRoot).then(() => true, () => false), false, "legacy state was not adopted");
   assert.equal(await readFile(join(currentRoot, kept), "utf8"), "seeded", "removal destroyed a delivered artifact");
   assert.equal(await stat(bundle).then(() => true, () => false), false, "removal left the installed App");
