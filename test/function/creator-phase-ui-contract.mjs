@@ -49,6 +49,17 @@ test("creator Chat labels delivered-app edits as builds", async () => {
   assert.match(source, /editing \? "Apply changes" : "Revise brief"/);
 });
 
+test("creator composers attach pasted images", async () => {
+  const [chat, idea] = await Promise.all([
+    read("shell/src/chat.tsx"),
+    read("shell/src/idea.tsx"),
+  ]);
+
+  assert.match(idea, /export function pastedFiles[\s\S]*clipboardData\.items[\s\S]*getAsFile/u);
+  assert.match(idea, /<textarea[\s\S]*onPaste=\{paste\}/u);
+  assert.match(chat, /<textarea[\s\S]*onPaste=\{paste\}/u);
+});
+
 test("creator keeps runtime output out of Chat and keeps the latest app in Preview", async () => {
   const [app, flow] = await Promise.all([
     read("shell/src/App.tsx"),

@@ -1,5 +1,5 @@
-import { useEffect, useRef, type ChangeEvent, type FormEvent, type KeyboardEvent } from "react";
-import { AttachmentList, type CreatorAttachment } from "./idea";
+import { useEffect, useRef, type ChangeEvent, type ClipboardEvent, type FormEvent, type KeyboardEvent } from "react";
+import { AttachmentList, pastedFiles, type CreatorAttachment } from "./idea";
 import "./creator.css";
 
 export type ChatMessage = {
@@ -57,6 +57,11 @@ export function ChatView({ messages, value, attachments, briefDelivered, editing
     if (files.length > 0) void onAttach(files);
   }
 
+  function paste(event: ClipboardEvent<HTMLTextAreaElement>): void {
+    const files = pastedFiles(event);
+    if (files.length > 0) void onAttach(files);
+  }
+
   function scroll(event: React.UIEvent<HTMLElement>): void {
     const node = event.currentTarget;
     atBottom.current = node.scrollHeight - node.scrollTop - node.clientHeight < 32;
@@ -84,6 +89,7 @@ export function ChatView({ messages, value, attachments, briefDelivered, editing
         value={value}
         onChange={(event) => onChange(event.target.value)}
         onKeyDown={keyDown}
+        onPaste={paste}
         placeholder="Tell the Agent what to change…"
         aria-label="Revise your idea"
         rows={3}

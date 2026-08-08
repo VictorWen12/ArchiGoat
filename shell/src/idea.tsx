@@ -1,4 +1,4 @@
-import { useEffect, useRef, type ChangeEvent, type FormEvent, type KeyboardEvent } from "react";
+import { useEffect, useRef, type ChangeEvent, type ClipboardEvent, type FormEvent, type KeyboardEvent } from "react";
 import type { Attachment } from "./transport";
 import "./creator.css";
 
@@ -7,6 +7,11 @@ export type CreatorAttachment = Pick<Attachment, "id" | "name" | "image"> & {
   imageUrl?: string;
   busy?: boolean;
 };
+
+/// PastedFiles keeps clipboard images on the same upload path as picked files.
+export function pastedFiles(event: ClipboardEvent<HTMLElement>): File[] {
+  return Array.from(event.clipboardData.items).filter((item) => item.kind === "file").map((item) => item.getAsFile()).filter((file): file is File => !!file);
+}
 
 export type IdeaViewProps = {
   value: string;
@@ -44,6 +49,11 @@ export function IdeaView({ value, attachments, busy = false, error = "", onChang
     if (files.length > 0) void onAttach(files);
   }
 
+  function paste(event: ClipboardEvent<HTMLTextAreaElement>): void {
+    const files = pastedFiles(event);
+    if (files.length > 0) void onAttach(files);
+  }
+
   const canSubmit = !busy && !attachments.some((item) => item.busy) && (!!value.trim() || attachments.length > 0);
   return <main className="creator-idea" aria-label="New idea">
     <form className="creator-composer creator-idea-composer" onSubmit={submit}>
@@ -53,6 +63,7 @@ export function IdeaView({ value, attachments, busy = false, error = "", onChang
         value={value}
         onChange={(event) => onChange(event.target.value)}
         onKeyDown={keyDown}
+        onPaste={paste}
         placeholder="Describe the app you have in mind…"
         aria-label="Your app idea"
         rows={5}
