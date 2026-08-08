@@ -25,6 +25,7 @@ export type PreviewScreenProps = {
   product: PreviewProduct;
   editable?: boolean;
   onEdit(): void;
+  onSaveDraft(): void;
   onContinue(): void;
 };
 
@@ -91,7 +92,7 @@ export function BuildScreen({ snapshot, issue, onStop, onRetry }: BuildScreenPro
 }
 
 // Preview gives the delivered source the whole canvas while keeping only creator actions nearby.
-export function PreviewScreen({ product, editable: editableOverride, onEdit, onContinue }: PreviewScreenProps) {
+export function PreviewScreen({ product, editable: editableOverride, onEdit, onSaveDraft, onContinue }: PreviewScreenProps) {
   const frame = useRef<HTMLIFrameElement>(null);
   const title = product.name.trim() || "Untitled app";
   const framed = product.previewKind === "html" || product.previewKind === "pdf" || product.previewKind === "text";
@@ -111,6 +112,7 @@ export function PreviewScreen({ product, editable: editableOverride, onEdit, onC
       </div>
       <nav className="preview-actions" aria-label="Preview actions">
         {editable && <button type="button" className="preview-edit" onClick={onEdit}>Edit</button>}
+        {editable && <button type="button" className="preview-save" onClick={onSaveDraft}>Save Draft</button>}
         <button type="button" className="preview-continue" onClick={onContinue}>Publish</button>
       </nav>
     </header>
@@ -136,7 +138,7 @@ export function PreviewScreen({ product, editable: editableOverride, onEdit, onC
 export function BuildPreview(props: BuildPreviewProps) {
   return props.surface === "build"
     ? <BuildScreen brief={props.brief} snapshot={props.snapshot} issue={props.issue} onStop={props.onStop} onRetry={props.onRetry} />
-    : <PreviewScreen product={props.product} editable={props.editable} onEdit={props.onEdit} onContinue={props.onContinue} />;
+    : <PreviewScreen product={props.product} editable={props.editable} onEdit={props.onEdit} onSaveDraft={props.onSaveDraft} onContinue={props.onContinue} />;
 }
 
 export { BuildScreen as BuildView, PreviewScreen as PreviewView };

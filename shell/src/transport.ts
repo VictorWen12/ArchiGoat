@@ -1,12 +1,12 @@
 // Keeps Account and the local Agent on the public ArchiGoat bridge only.
 
-export const PROTOCOL = 15;
+export const PROTOCOL = 16;
 export const ACCOUNT_ORIGIN = "https://triangoat.com";
 export const ACCOUNT_AUTHORIZATION_URL = `${ACCOUNT_ORIGIN}/?authorize=archigoat`;
 
 export type Session = { id: string; title: string; updatedAt: number; folderId: string | null; pinnedAt: number | null };
 export type Attachment = { id: string; name: string; media: string; bytes: number; sha256: string; image: boolean; url: string };
-export type Turn = { id: number; role: "me" | "goat"; text: string; at: number; attachments: Attachment[]; product?: Product };
+export type Turn = { id: number; role: "me" | "goat"; text: string; at: number; workId?: string; deliveryId?: string; attachments: Attachment[]; product?: Product };
 export type ProductFile = { id: string; path: string; form: string; size: number; sha256: string };
 export type Product = { id: string; name: string; description: string; tags: string[]; form: string; size: number; previewKind: "image" | "video" | "html" | "pdf" | "text" | null; published: boolean; files: ProductFile[] };
 export type WorkIntent = "brief" | "build";
@@ -392,6 +392,8 @@ function turnValue(value: unknown): value is Turn {
   if (!value || typeof value !== "object") return false;
   const item = value as Turn;
   return Number.isSafeInteger(item.id) && (item.role === "me" || item.role === "goat") && text(item.text) && Number.isSafeInteger(item.at)
+    && (item.workId === undefined || (text(item.workId) && !!item.workId))
+    && (item.deliveryId === undefined || (text(item.deliveryId) && !!item.deliveryId))
     && Array.isArray(item.attachments) && item.attachments.every(attachmentValue) && (item.product === undefined || productValue(item.product));
 }
 
@@ -462,6 +464,20 @@ export async function appendTurn(session: string, textValue: string, attachments
   };
 }
 
+export async function steerTurn(session: string, workId: string, textValue: string, attachments: string[], computer?: string): Promise<{ id: number; at: number; deliveryId: string; workId: string; computer: string | null }> {
+  const response = await accountRequest("/auth/goat/steer", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ session, workId, text: textValue, attachments, ...(computer ? { computer } : {}) }),
+  });
+  const value = await json<{ id?: unknown; at?: unknown; deliveryId?: unknown; workId?: unknown; computer?: unknown }>(response);
+  if (!Number.isSafeInteger(value.id) || !Number.isSafeInteger(value.at) || !text(value.deliveryId) || !value.deliveryId
+    || value.workId !== workId || (value.computer !== null && !text(value.computer))) {
+    throw new BridgeError(0, "TrianGoat did not continue this Work.");
+  }
+  return { id: value.id as number, at: value.at as number, deliveryId: value.deliveryId, workId, computer: value.computer };
+}
+
 export async function removeSession(session: string): Promise<void> {
   await accountRequest("/auth/goat/remove", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ session }) });
 }
@@ -511,6 +527,21 @@ export async function startWork(workId: string, conversation: string, goal: stri
   await loopbackRequest(`/v1/work?workId=${encodeURIComponent(workId)}`, {
     method: "POST", headers: { "Content-Type": "application/json", "x-work-id": workId, "x-work-kind": "start" },
     body: JSON.stringify({ conversation, goal, context, attachments, intent }),
+  });
+}
+
+export async function steerLocalWork(workId: string, steerId: number, textValue: string, attachments: InputReceipt[]): Promise<void> {
+  await loopbackRequest(`/v1/work/steer?workId=${encodeURIComponent(workId)}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "x-work-id": workId, "x-work-kind": "steer" },
+    body: JSON.stringify({ goal: textValue, attachments, steerId }),
+  });
+}
+
+export async function publishLocalWork(workId: string): Promise<void> {
+  await loopbackRequest(`/v1/work/publish?workId=${encodeURIComponent(workId)}`, {
+    method: "POST",
+    headers: { "x-work-id": workId, "x-work-kind": "publish" },
   });
 }
 

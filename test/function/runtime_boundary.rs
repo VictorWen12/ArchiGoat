@@ -355,6 +355,20 @@ mod state {
             }
         }
 
+        pub(crate) fn settle_checkpoint(&mut self, _work_id: &str) -> Option<(PathBuf, bool)> {
+            None
+        }
+
+        pub(crate) fn rollback_checkpoint(&mut self, _work_id: &str) {}
+
+        pub(crate) fn publish_paths(&self, _work_id: &str) -> Option<(PathBuf, PathBuf)> {
+            None
+        }
+
+        pub(crate) fn take_published(&mut self, _work_id: &str) -> Option<Entry> {
+            None
+        }
+
         pub(crate) fn take_terminal(&mut self, work_id: &str) -> Option<Entry> {
             if !matches!(self.entries.get(work_id), Some(Entry::Terminal { .. })) {
                 return None;

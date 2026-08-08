@@ -2,7 +2,11 @@
 
 use std::collections::VecDeque;
 
-use crate::{state::RunProgress, work::RuntimeSteer};
+use crate::{
+    delivery::{DeliveryFile, Harvested},
+    state::RunProgress,
+    work::{ResultKind, RuntimeSteer},
+};
 
 use super::{
     model::{Entry, TurnStop},
@@ -26,6 +30,21 @@ pub(super) struct SteeringRollback {
     turn_stop: TurnStop,
 }
 
+/// QueueSteerRollback restores either an ordinary Running mutation or its delivered checkpoint.
+pub(super) enum QueueSteerRollback {
+    Running(SteeringRollback),
+    Checkpoint(CheckpointRollback),
+}
+
+pub(super) struct CheckpointRollback {
+    answer: String,
+    kind: ResultKind,
+    run: Option<String>,
+    manifest: Vec<DeliveryFile>,
+    harvested: Option<Harvested>,
+    ended_at: Option<u64>,
+}
+
 // This store mutates steering only through rollback-safe durable transition primitives.
 impl WorkStore {
     /// QueueSteer accepts one idempotent follow-up as head or ordered tail.
@@ -33,7 +52,47 @@ impl WorkStore {
         &mut self,
         work_id: &str,
         steer: RuntimeSteer,
-    ) -> Result<Option<(SteeringRollback, bool)>, String> {
+    ) -> Result<Option<(QueueSteerRollback, bool)>, String> {
+        if matches!(self.entries.get(work_id), Some(Entry::Checkpoint(_))) {
+            let Some(Entry::Checkpoint(checkpoint)) = self.entries.remove(work_id) else {
+                unreachable!();
+            };
+            if !checkpoint.settled {
+                self.entries
+                    .insert(work_id.to_owned(), Entry::Checkpoint(checkpoint));
+                return Err("Work checkpoint is still delivering".to_owned());
+            }
+            steer.validate(work_id, &checkpoint.running.session)?;
+            let rollback = CheckpointRollback {
+                answer: checkpoint.answer,
+                kind: checkpoint.kind,
+                run: checkpoint.run,
+                manifest: checkpoint.manifest,
+                harvested: checkpoint.harvested,
+                ended_at: checkpoint.ended_at,
+            };
+            let mut work = checkpoint.running;
+            work.launched = false;
+            work.repair = false;
+            work.steer = Some(steer);
+            work.steers.clear();
+            work.steering = true;
+            work.steer_delivered = false;
+            work.rotating = false;
+            work.stopping = false;
+            work.repairs = 0;
+            work.attention = false;
+            work.failure = None;
+            work.started_at = crate::work::runtime::now_ms()?;
+            work.answer.clear();
+            work.progress = None;
+            work.tokens = None;
+            work.model = None;
+            work.turn_stop = TurnStop::new();
+            self.entries
+                .insert(work_id.to_owned(), Entry::Running(work));
+            return Ok(Some((QueueSteerRollback::Checkpoint(rollback), true)));
+        }
         let Some(Entry::Running(work)) = self.entries.get_mut(work_id) else {
             return Err("Work is not Running".to_owned());
         };
@@ -74,14 +133,14 @@ impl WorkStore {
             work.repair = false;
             work.failure = None;
             work.turn_stop = TurnStop::new();
-            return Ok(Some((rollback, true)));
+            return Ok(Some((QueueSteerRollback::Running(rollback), true)));
         }
         if work.steer.is_none() {
             work.steer = Some(steer);
         } else {
             work.steers.push_back(steer);
         }
-        Ok(Some((rollback, false)))
+        Ok(Some((QueueSteerRollback::Running(rollback), false)))
     }
 
     /// RotationAuthority exposes only an eligible queued Build turn's internal stop signal.
@@ -158,10 +217,37 @@ impl WorkStore {
     }
 
     /// RollbackSteering restores the exact in-memory facts preceding a failed durable save.
+    pub(super) fn rollback_queue_steer(&mut self, work_id: &str, rollback: QueueSteerRollback) {
+        match rollback {
+            QueueSteerRollback::Running(rollback) => {
+                self.rollback_steering(work_id, rollback);
+                return;
+            }
+            QueueSteerRollback::Checkpoint(checkpoint) => {
+                let Some(Entry::Running(running)) = self.entries.remove(work_id) else {
+                    return;
+                };
+                self.entries.insert(
+                    work_id.to_owned(),
+                    Entry::Checkpoint(super::model::CheckpointWork {
+                        running,
+                        answer: checkpoint.answer,
+                        kind: checkpoint.kind,
+                        run: checkpoint.run,
+                        manifest: checkpoint.manifest,
+                        harvested: checkpoint.harvested,
+                        settled: true,
+                        ended_at: checkpoint.ended_at,
+                    }),
+                );
+                return;
+            }
+        }
+    }
+
+    /// RollbackSteering restores one in-place Running transition.
     pub(super) fn rollback_steering(&mut self, work_id: &str, rollback: SteeringRollback) {
-        let Some(Entry::Running(work)) = self.entries.get_mut(work_id) else {
-            return;
-        };
+        let Some(Entry::Running(work)) = self.entries.get_mut(work_id) else { return; };
         work.steer = rollback.steer;
         work.steers = rollback.steers;
         work.steering = rollback.steering;

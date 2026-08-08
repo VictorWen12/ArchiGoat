@@ -101,7 +101,7 @@ impl DaemonState {
                 .unwrap_or(work_id)
                 .to_owned()
         });
-        let running = self
+        let rollback = self
             .works
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
@@ -119,7 +119,7 @@ impl DaemonState {
             self.works
                 .lock()
                 .unwrap_or_else(|poisoned| poisoned.into_inner())
-                .restore_running(running);
+                .restore_finished(work_id, rollback);
             return Err(CompletionError::Retry(error));
         }
         if kind == crate::work::ResultKind::Answer

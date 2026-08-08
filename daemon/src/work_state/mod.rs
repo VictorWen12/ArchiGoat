@@ -248,6 +248,7 @@ impl DaemonState {
                     if let Some(entry) = works.entries.get_mut(&work_id) {
                         match entry {
                             model::Entry::Running(work) => work.remote = false,
+                            model::Entry::Checkpoint(work) => work.running.remote = false,
                             model::Entry::ArtifactPending(work) => work.remote = false,
                             model::Entry::Done(work) => work.remote = false,
                             model::Entry::Stopped(work) => work.remote = false,
@@ -384,7 +385,7 @@ impl DaemonState {
             if let Some((rollback, _)) = queued
                 && let Err(error) = works.save(self.work_state_path())
             {
-                works.rollback_steering(work_id, rollback);
+                works.rollback_queue_steer(work_id, rollback);
                 return Err(error);
             }
             let resumed = restart

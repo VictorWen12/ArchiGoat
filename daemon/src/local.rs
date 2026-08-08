@@ -178,6 +178,7 @@ pub(crate) fn app(daemon: DaemonState) -> Router {
             post(deliver_work).layer(DefaultBodyLimit::max(16 * 1024)),
         )
         .route("/v1/work/steer", post(steer_work))
+        .route("/v1/work/publish", post(publish_work))
         .layer(middleware::from_fn_with_state(state.clone(), security))
         .with_state(state.clone());
     // Health carries no native authority and remains readable without a voucher.
@@ -388,6 +389,18 @@ async fn steer_work(
         },
     )
     .await)
+}
+
+// PublishWork applies Account's successful Publish to this computer's private lifecycle state.
+async fn publish_work(
+    State(state): State<LocalState>,
+    Query(query): Query<WorkQuery>,
+) -> Result<Response, ApiError> {
+    state
+        .daemon
+        .publish_work(&valid_work(query.work_id)?)
+        .map(|()| StatusCode::NO_CONTENT.into_response())
+        .map_err(|_| ApiError(StatusCode::CONFLICT, "Publish requires a delivered Work"))
 }
 
 // ObserveWork returns the next durable public snapshot or 204 only when this Work is absent.

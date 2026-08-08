@@ -18,7 +18,7 @@ const ACCOUNT_URL: &str = match option_env!("ACCOUNT_URL") {
     None => "https://triangoat.com",
 };
 const LOOPBACK_URL: &str = "http://127.0.0.1:17891";
-const PROTOCOL: u16 = 15;
+const PROTOCOL: u16 = 16;
 const HANDOFF_URL: &str = "http://127.0.0.1:17891/internal/handoff";
 const HANDOFF_ATTEMPTS: usize = 20;
 const HANDOFF_RETRY_DELAY: Duration = Duration::from_millis(250);

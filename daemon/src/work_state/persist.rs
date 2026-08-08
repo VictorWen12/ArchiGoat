@@ -77,6 +77,64 @@ pub(super) enum SavedWork {
         #[serde(default)]
         protected_outputs: Vec<String>,
     },
+    Checkpoint {
+        #[serde(default)]
+        remote: bool,
+        work_id: String,
+        provider: Provider,
+        #[serde(default)]
+        model_selection: Option<String>,
+        #[serde(default)]
+        effort_selection: Option<String>,
+        session: PathBuf,
+        freeze_root: PathBuf,
+        native_session: String,
+        #[serde(default)]
+        runner_id: String,
+        #[serde(default)]
+        input_path: PathBuf,
+        #[serde(default, skip_serializing_if = "String::is_empty")]
+        input: String,
+        #[serde(default = "legacy_launched")]
+        launched: bool,
+        #[serde(default)]
+        repair: bool,
+        #[serde(default)]
+        steer: Option<RuntimeSteer>,
+        #[serde(default)]
+        steers: VecDeque<RuntimeSteer>,
+        #[serde(default)]
+        steering: bool,
+        #[serde(default)]
+        steer_delivered: bool,
+        #[serde(default)]
+        rotating: bool,
+        #[serde(default)]
+        stopping: bool,
+        #[serde(default)]
+        repairs: u32,
+        #[serde(default)]
+        attention: bool,
+        #[serde(default)]
+        failure: Option<String>,
+        started_at: u64,
+        answer: String,
+        #[serde(default)]
+        progress: Option<RunProgress>,
+        #[serde(default)]
+        tokens: Option<u64>,
+        #[serde(default)]
+        model: Option<String>,
+        #[serde(default)]
+        protected_outputs: Vec<String>,
+        kind: ResultKind,
+        run: Option<String>,
+        manifest: Vec<DeliveryFile>,
+        #[serde(default)]
+        settled: bool,
+        #[serde(default)]
+        ended_at: Option<u64>,
+    },
     ArtifactPending {
         #[serde(default)]
         remote: bool,

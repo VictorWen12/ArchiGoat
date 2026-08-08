@@ -576,6 +576,7 @@ async fn execute(
             api::work::stop(state, &job.work).await;
             Ok(())
         }
+        "publish" => state.publish_work(&job.work),
         _ => Err("Account sent an invalid job kind".to_owned()),
     }
 }

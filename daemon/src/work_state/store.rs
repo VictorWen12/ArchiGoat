@@ -11,7 +11,7 @@ use crate::{
     work::{ResultKind, RuntimeRecovery, RuntimeWork},
 };
 
-use super::model::{DoneWork, Entry, Running, StoppedWork, snapshot};
+use super::model::{CheckpointWork, DoneWork, Entry, Running, StoppedWork, snapshot};
 
 // RunningNeedsPower names the durable entries that can still execute or verify bytes.
 fn running_needs_power(entry: &Entry) -> bool {
@@ -23,6 +23,12 @@ fn running_needs_power(entry: &Entry) -> bool {
 pub(crate) struct WorkStore {
     pub(super) entries: HashMap<String, Entry>,
     pub(super) native_owned: HashSet<String>,
+}
+
+/// FinishRollback restores the pre-checkpoint Running owner if durable save fails.
+pub(super) enum FinishRollback {
+    Local(Running),
+    Remote,
 }
 
 // This store durably owns the latest state for every local frozen Work.
@@ -45,7 +51,7 @@ impl WorkStore {
     pub(crate) fn active_ids(&self) -> HashSet<String> {
         self.entries
             .iter()
-            .filter(|(_, entry)| matches!(entry, Entry::Running(_)))
+            .filter(|(_, entry)| matches!(entry, Entry::Running(_) | Entry::Checkpoint(_)))
             .map(|(id, _)| id.clone())
             .collect()
     }
@@ -55,7 +61,10 @@ impl WorkStore {
         let mut candidates = self
             .entries
             .iter()
-            .filter(|(_, entry)| matches!(entry, Entry::Done(work) if work.remote))
+            .filter(|(_, entry)| {
+                matches!(entry, Entry::Done(work) if work.remote)
+                    || matches!(entry, Entry::Checkpoint(work) if work.running.remote && !work.settled)
+            })
             .map(|(work_id, entry)| (work_id.clone(), snapshot(entry)))
             .collect::<Vec<_>>();
         candidates.sort_by(|left, right| left.0.cmp(&right.0));
@@ -82,6 +91,7 @@ impl WorkStore {
                 Entry::Running(work) => {
                     work.remote && (work.attention || self.native_owned.contains(work_id.as_str()))
                 }
+                Entry::Checkpoint(work) => work.running.remote,
                 Entry::ArtifactPending(work) => {
                     work.remote && self.native_owned.contains(work_id.as_str())
                 }
@@ -108,6 +118,7 @@ impl WorkStore {
     pub(super) fn is_remote(&self, work_id: &str) -> Option<bool> {
         self.entries.get(work_id).map(|entry| match entry {
             Entry::Running(work) => work.remote,
+            Entry::Checkpoint(work) => work.running.remote,
             Entry::ArtifactPending(work) => work.remote,
             Entry::Done(work) => work.remote,
             Entry::Stopped(work) => work.remote,
@@ -121,6 +132,7 @@ impl WorkStore {
         };
         match entry {
             Entry::Running(work) => work.remote = true,
+            Entry::Checkpoint(work) => work.running.remote = true,
             Entry::ArtifactPending(work) => work.remote = true,
             Entry::Done(work) => work.remote = true,
             Entry::Stopped(work) => work.remote = true,
@@ -181,6 +193,7 @@ impl WorkStore {
     pub(super) fn binding(&self, work_id: &str) -> Option<RuntimeRecovery> {
         match self.entries.get(work_id) {
             Some(Entry::Running(work)) => recovery(work),
+            Some(Entry::Checkpoint(work)) => recovery(&work.running),
             _ => None,
         }
     }
@@ -205,10 +218,14 @@ impl WorkStore {
     ) -> bool {
         !native_session.is_empty()
             && self.entries.values().any(|entry| {
-                matches!(entry, Entry::Running(work)
-                    if work.provider == provider
-                        && work.native_session == native_session
-                        && except != Some(work.work_id.as_str()))
+                match entry {
+                    Entry::Running(work) | Entry::Checkpoint(CheckpointWork { running: work, .. }) => {
+                        work.provider == provider
+                            && work.native_session == native_session
+                            && except != Some(work.work_id.as_str())
+                    }
+                    _ => false,
+                }
             })
     }
 
@@ -222,8 +239,10 @@ impl WorkStore {
         bound_session: Option<&str>,
     ) -> Option<String> {
         self.entries.values().find_map(|entry| {
-            let Entry::Running(work) = entry else {
-                return None;
+            let work = match entry {
+                Entry::Running(work) => work,
+                Entry::Checkpoint(work) => &work.running,
+                _ => return None,
             };
             if work.provider != provider {
                 return None;
@@ -243,8 +262,10 @@ impl WorkStore {
         &self,
         work_id: &str,
     ) -> Option<(crate::provider::Provider, Option<String>, String)> {
-        let Some(Entry::Running(work)) = self.entries.get(work_id) else {
-            return None;
+        let work = match self.entries.get(work_id)? {
+            Entry::Running(work) => work,
+            Entry::Checkpoint(work) => &work.running,
+            _ => return None,
         };
         let (conversation, _) =
             crate::work::runtime::stored_runtime(&work.input_path, &work.work_id).ok()?;
@@ -255,6 +276,7 @@ impl WorkStore {
     pub(super) fn stop_authority(&self, work_id: &str) -> Option<OwnerStop> {
         match self.entries.get(work_id) {
             Some(Entry::Running(work)) => Some(work.stop.clone()),
+            Some(Entry::Checkpoint(work)) => Some(work.running.stop.clone()),
             _ => None,
         }
     }
@@ -262,6 +284,7 @@ impl WorkStore {
     /// NeedsAttention distinguishes a parked Running owner from an executing turn.
     pub(super) fn needs_attention(&self, work_id: &str) -> bool {
         matches!(self.entries.get(work_id), Some(Entry::Running(work)) if work.attention)
+            || matches!(self.entries.get(work_id), Some(Entry::Checkpoint(_)))
     }
 
     /// ProgressSequence resumes a new native continuation after the last public Provider action.
@@ -411,12 +434,28 @@ impl WorkStore {
         run: Option<String>,
         native_session: String,
         harvested: Harvested,
-    ) -> Option<Running> {
+    ) -> Option<FinishRollback> {
         let Entry::Running(running) = self.entries.remove(work_id)? else {
             return None;
         };
         crate::keepalive::work_stopped(work_id);
         let manifest = harvested.manifest.clone();
+        if running.remote {
+            self.entries.insert(
+                work_id.to_owned(),
+                Entry::Checkpoint(CheckpointWork {
+                    running,
+                    answer,
+                    kind,
+                    run,
+                    manifest,
+                    harvested: Some(harvested),
+                    settled: false,
+                    ended_at: crate::work::runtime::now_ms().ok(),
+                }),
+            );
+            return Some(FinishRollback::Remote);
+        }
         let freeze_root = (kind == ResultKind::Artifact).then(|| running.freeze_root.clone());
         self.entries.insert(
             work_id.to_owned(),
@@ -436,11 +475,20 @@ impl WorkStore {
                 ended_at: crate::work::runtime::now_ms().ok(),
             }),
         );
-        Some(running)
+        Some(FinishRollback::Local(running))
     }
 
-    /// RestoreRunning reverses only an uncommitted Done so success cannot outrun disk.
-    pub(super) fn restore_running(&mut self, running: Running) {
+    /// RestoreFinished reverses only an uncommitted result so success cannot outrun disk.
+    pub(super) fn restore_finished(&mut self, work_id: &str, rollback: FinishRollback) {
+        let running = match rollback {
+            FinishRollback::Local(running) => running,
+            FinishRollback::Remote => {
+                let Some(Entry::Checkpoint(work)) = self.entries.remove(work_id) else {
+                    return;
+                };
+                work.running
+            }
+        };
         let work_id = running.work_id.clone();
         let active = !running.attention;
         self.entries
@@ -448,6 +496,40 @@ impl WorkStore {
         if active {
             crate::keepalive::work_started(&work_id);
         }
+    }
+
+    /// SettleCheckpoint records that Account owns this turn while preserving its resumable Work.
+    pub(super) fn settle_checkpoint(&mut self, work_id: &str) -> Option<(PathBuf, bool)> {
+        let Some(Entry::Checkpoint(work)) = self.entries.get_mut(work_id) else {
+            return None;
+        };
+        if work.settled {
+            return Some((work.running.freeze_root.clone(), false));
+        }
+        work.settled = true;
+        Some((work.running.freeze_root.clone(), true))
+    }
+
+    pub(super) fn rollback_checkpoint(&mut self, work_id: &str) {
+        if let Some(Entry::Checkpoint(work)) = self.entries.get_mut(work_id) {
+            work.settled = false;
+        }
+    }
+
+    /// PublishPaths exposes private state only after Account's explicit Publish job.
+    pub(super) fn publish_paths(&self, work_id: &str) -> Option<(PathBuf, PathBuf)> {
+        match self.entries.get(work_id) {
+            Some(Entry::Checkpoint(work)) => Some((
+                work.running.session.clone(),
+                work.running.freeze_root.clone(),
+            )),
+            _ => None,
+        }
+    }
+
+    pub(super) fn take_published(&mut self, work_id: &str) -> Option<Entry> {
+        self.publish_paths(work_id)?;
+        self.entries.remove(work_id)
     }
 
     /// MarkStopped prepares one terminal end while retaining the previous entry for save rollback; only a runner that already ended may skip owner authority, and its end is durably recorded as not the owner's.
@@ -464,6 +546,12 @@ impl WorkStore {
                 Some(work.session.clone()),
                 Some(work.freeze_root.clone()),
                 work.started_at,
+            ),
+            Entry::Checkpoint(work) if work.running.stop.requested() || !owner => (
+                work.running.remote,
+                Some(work.running.session.clone()),
+                Some(work.running.freeze_root.clone()),
+                work.running.started_at,
             ),
             Entry::ArtifactPending(work) => (
                 work.remote,
@@ -529,6 +617,7 @@ impl WorkStore {
             .filter_map(|entry| match entry {
                 // A live or reverifying Work carries no end, which retention reads as untouchable.
                 Entry::Running(work) => Some((work.session.clone(), None)),
+                Entry::Checkpoint(work) => Some((work.running.session.clone(), None)),
                 Entry::ArtifactPending(work) => work.session.clone().map(|path| (path, None)),
                 Entry::Done(work) => work.session.clone().map(|path| (path, work.ended_at)),
                 Entry::Stopped(work) => work.session.clone().map(|path| (path, work.ended_at)),
@@ -543,6 +632,7 @@ impl WorkStore {
             .filter_map(|entry| match entry {
                 // A Work that can still deliver carries no end, which retention reads as untouchable.
                 Entry::Running(work) => Some((work.freeze_root.clone(), None)),
+                Entry::Checkpoint(work) => Some((work.running.freeze_root.clone(), None)),
                 Entry::ArtifactPending(work) => Some((work.freeze_root.clone(), None)),
                 Entry::Done(work) => work.freeze_root.clone().map(|path| (path, work.ended_at)),
                 Entry::Stopped(work) => work.freeze_root.clone().map(|path| (path, work.ended_at)),
@@ -554,6 +644,7 @@ impl WorkStore {
     pub(crate) fn retire_reaped(&mut self, reaped: &HashSet<PathBuf>) -> bool {
         let before = self.entries.len();
         self.entries.retain(|_, entry| match entry {
+            Entry::Checkpoint(_) => true,
             Entry::Done(work) => work
                 .session
                 .as_ref()

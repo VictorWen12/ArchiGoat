@@ -20,6 +20,10 @@ impl WorkStore {
         self.entries
             .values()
             .find_map(|entry| match entry {
+                Entry::Checkpoint(work) if work.run.as_deref() == Some(run) => work
+                    .harvested
+                    .as_ref()
+                    .map(|harvested| harvested.open(name)),
                 Entry::Done(done) if done.run.as_deref() == Some(run) => done
                     .harvested
                     .as_ref()

@@ -17,7 +17,8 @@ use crate::{
 
 use super::{
     model::{
-        ArtifactPending, DoneWork, Entry, MAX_REPAIRS, RUNNER_END, Running, StoppedWork, TurnStop,
+        ArtifactPending, CheckpointWork, DoneWork, Entry, MAX_REPAIRS, RUNNER_END, Running,
+        StoppedWork, TurnStop,
     },
     persist::SavedWork,
 };
@@ -140,6 +141,122 @@ pub(super) fn restore(saved: SavedWork) -> Result<(String, Entry), String> {
                     protected_outputs,
                     stop,
                     turn_stop,
+                }),
+            ))
+        }
+        // A checkpoint restores its resumable native owner without launching another turn.
+        SavedWork::Checkpoint {
+            remote,
+            work_id,
+            provider,
+            model_selection,
+            effort_selection,
+            session,
+            freeze_root,
+            native_session,
+            runner_id,
+            input_path,
+            input,
+            launched,
+            repair,
+            steer,
+            steers,
+            steering,
+            steer_delivered,
+            rotating,
+            stopping,
+            repairs,
+            attention,
+            failure,
+            started_at,
+            answer,
+            progress,
+            tokens,
+            model,
+            protected_outputs,
+            kind,
+            run,
+            manifest,
+            settled,
+            ended_at,
+        } => {
+            valid_running_identity(&work_id, provider, &native_session)?;
+            if stopping || attention {
+                return Err("Stored checkpoint state is invalid".to_owned());
+            }
+            let (steer, steers, steering, rotating) =
+                sanitized_steers(&work_id, &session, steer, steers, steering, rotating);
+            if steering && rotating {
+                return Err("Stored checkpoint steer state is invalid".to_owned());
+            }
+            let input_path = input::restore(&session, input_path, input)?;
+            valid_runner(&runner_id, &input_path)?;
+            let harvested = match kind {
+                ResultKind::Artifact => {
+                    let run = run
+                        .as_deref()
+                        .ok_or_else(|| "Stored checkpoint run is invalid".to_owned())?;
+                    valid_artifact(&work_id, kind, run, &native_session, &manifest)?;
+                    if settled {
+                        None
+                    } else {
+                        Some(Harvested::rehydrate(
+                            answer.clone(),
+                            kind,
+                            manifest.clone(),
+                            freeze_root.clone(),
+                        )?)
+                    }
+                }
+                ResultKind::Answer => {
+                    if run.is_some() || !manifest.is_empty() || answer.trim().is_empty() {
+                        return Err("Stored checkpoint answer is invalid".to_owned());
+                    }
+                    None
+                }
+            };
+            let id = work_id.clone();
+            Ok((
+                id,
+                Entry::Checkpoint(CheckpointWork {
+                    running: Running {
+                        remote,
+                        work_id,
+                        provider,
+                        model_selection,
+                        effort_selection,
+                        session,
+                        freeze_root,
+                        native_session,
+                        runner_id,
+                        input_path,
+                        launched,
+                        repair,
+                        steer,
+                        steers,
+                        steering,
+                        steer_delivered,
+                        rotating,
+                        stopping: false,
+                        repairs,
+                        attention: false,
+                        failure,
+                        started_at,
+                        answer: answer.clone(),
+                        progress,
+                        tokens,
+                        model,
+                        protected_outputs: protected_outputs_prefix(protected_outputs),
+                        stop: OwnerStop::new(),
+                        turn_stop: TurnStop::new(),
+                    },
+                    answer,
+                    kind,
+                    run,
+                    manifest,
+                    harvested,
+                    settled,
+                    ended_at,
                 }),
             ))
         }

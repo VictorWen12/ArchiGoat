@@ -24,6 +24,28 @@ impl DaemonState {
 
     /// AcknowledgeWork settles terminal truth even when private bookkeeping needs later repair.
     pub(crate) fn acknowledge_work(&self, work_id: &str) -> Result<(), String> {
+        let checkpoint = {
+            let mut works = self
+                .works
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            let checkpoint = works.settle_checkpoint(work_id);
+            if checkpoint.as_ref().is_some_and(|(_, changed)| *changed)
+                && let Err(error) = works.save(self.work_state_path())
+            {
+                works.rollback_checkpoint(work_id);
+                return Err(error);
+            }
+            checkpoint
+        };
+        if let Some((freeze_root, _)) = checkpoint {
+            // Account owns this turn's bytes. The Work session remains for Build/Edit/Draft.
+            if let Err(error) = crate::delivery::discard_private_tree(&freeze_root) {
+                eprintln!("Product could not discard checkpoint delivery: {error}");
+            }
+            self.work_events.notify_waiters();
+            return Ok(());
+        }
         let paths = {
             let works = self
                 .works
@@ -75,6 +97,52 @@ impl DaemonState {
             eprintln!("Product could not settle acknowledged Work state: {error}");
             return Ok(());
         }
+        self.work_events.notify_waiters();
+        Ok(())
+    }
+
+    /// PublishWork is the only Account order that deletes a delivered creator Work and its runtime.
+    pub(crate) fn publish_work(&self, work_id: &str) -> Result<(), String> {
+        let paths = self
+            .works
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .publish_paths(work_id);
+        let Some((session, freeze_root)) = paths else {
+            if self
+                .works
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner())
+                .contains(work_id)
+            {
+                return Err("Publish requires a delivered Work".to_owned());
+            }
+            return Ok(());
+        };
+        if let Err(error) = crate::delivery::discard_private_tree(&freeze_root) {
+            eprintln!("Product could not discard published delivery: {error}");
+        }
+        if let Err(error) = crate::work::input_view::InputView::discard_session(&session) {
+            eprintln!("Product could not discard published input view: {error}");
+        }
+        if let Err(error) = crate::delivery::discard_private_tree(&session) {
+            eprintln!("Product could not discard published session: {error}");
+        }
+        if let Err(error) = self.discard_work_inputs(work_id) {
+            eprintln!("Product could not discard published inputs: {error}");
+        }
+        let mut works = self
+            .works
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let Some(entry) = works.take_published(work_id) else {
+            return Ok(());
+        };
+        if let Err(error) = works.save(self.work_state_path()) {
+            works.restore_entry(work_id, entry);
+            return Err(error);
+        }
+        drop(works);
         self.work_events.notify_waiters();
         Ok(())
     }

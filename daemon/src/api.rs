@@ -21,10 +21,10 @@ use crate::{
 };
 
 /// PROTOCOL identifies the one Browser-to-ArchiGoat action contract used by this build.
-pub(crate) const PROTOCOL: u16 = 15;
+pub(crate) const PROTOCOL: u16 = 16;
 
 /// MIN_PROTOCOL is the exact server floor; older clients must upgrade.
-pub(crate) const MIN_PROTOCOL: u16 = 15;
+pub(crate) const MIN_PROTOCOL: u16 = 16;
 
 /// Action is one complete product request already authenticated by the loopback boundary.
 pub(crate) enum Action {

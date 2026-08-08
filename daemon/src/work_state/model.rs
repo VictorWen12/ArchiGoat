@@ -72,9 +72,22 @@ pub(super) fn attention_text(provider: Provider, reason: &str) -> String {
 /// Entry adds artifact recovery internally while its one terminal Stop carries its own public cause.
 pub(super) enum Entry {
     Running(Running),
+    Checkpoint(CheckpointWork),
     ArtifactPending(ArtifactPending),
     Done(DoneWork),
     Stopped(StoppedWork),
+}
+
+/// CheckpointWork keeps one delivered turn and the exact runtime that the creator may resume.
+pub(super) struct CheckpointWork {
+    pub(super) running: Running,
+    pub(super) answer: String,
+    pub(super) kind: ResultKind,
+    pub(super) run: Option<String>,
+    pub(super) manifest: Vec<DeliveryFile>,
+    pub(super) harvested: Option<Harvested>,
+    pub(super) settled: bool,
+    pub(super) ended_at: Option<u64>,
 }
 
 /// Running binds one Provider runner, native session, Stop authority, and public progress.
@@ -222,6 +235,19 @@ pub(super) fn snapshot(entry: &Entry) -> RunSnapshot {
             work.tokens,
             work.model.clone(),
         ),
+        Entry::Checkpoint(work) => RunSnapshot {
+            phase: RunPhase::Done,
+            text: work.answer.clone(),
+            started_at: work.running.started_at,
+            progress: None,
+            tokens: None,
+            model: None,
+            kind: Some(work.kind),
+            run: work.run.clone(),
+            files: work.manifest.clone(),
+            events: Vec::new(),
+            awaiting: work.manifest.is_empty() && !work.answer.trim().is_empty(),
+        },
         Entry::ArtifactPending(work) => {
             running_snapshot(work.started_at, work.answer.clone(), None, None, None)
         }

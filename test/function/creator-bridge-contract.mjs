@@ -17,6 +17,10 @@ test("creator bridge carries intent, publish metadata, and one-screen routing", 
 
   assert.match(transport, /type WorkIntent = "brief" \| "build"/);
   assert.match(transport, /appendTurn\(session: string, textValue: string, attachments: string\[\], intent: WorkIntent\)/u);
+  assert.match(transport, /steerTurn\(session: string, workId: string, textValue: string, attachments: string\[\]/u,
+    "every later creator turn must steer the original Account Work");
+  assert.match(transport, /steerLocalWork\(workId: string, steerId: number, textValue: string, attachments: InputReceipt\[\]\)/u,
+    "desktop continuation must steer the original native Work");
   assert.match(transport, /created:\s*response\.status === 201/u,
     "the Account's 201\/200 owner signal must survive the transport boundary");
   assert.match(transport, /JSON\.stringify\(\{ session, role: "me", text: textValue, attachments, intent \}\)/u,
@@ -28,6 +32,8 @@ test("creator bridge carries intent, publish metadata, and one-screen routing", 
     "pending phone Work must carry its frozen intent into the desktop phase state");
   assert.match(transport, /type PublishMetadata = \{[^}]*description: string; tags: string\[\]/);
   assert.match(transport, /publishProduct\(metadata: PublishMetadata\)[\s\S]*JSON\.stringify\(metadata\)/);
+  assert.match(app, /await publishProduct\(metadata\);[\s\S]*?await publishLocalWork\(lifecycle\.workId\)/u,
+    "Account Publish must authorize local lifecycle cleanup");
   assert.match(mine, /description:\s*string/);
 
   assert.match(app, /<IdeaView\b/);
@@ -65,9 +71,13 @@ test("creator edit has one local or phone-owned Work owner", async () => {
   assert.match(app, /function tryProduct\(product: MineProduct\): void \{[\s\S]*?if \(product\.sessionId && liveWork\([\s\S]*?setView\(workSurface\(/u,
     "an old playable result cannot bypass a live Build phase");
   assert.match(app, /const editingDelivered = !!latestProduct\(turns\)[\s\S]*?const intent: WorkIntent = editingDelivered \? "build" : "brief";[\s\S]*?startCreatorTurn\(active, value, intent, files\)/u,
-    "a delivered Preview edit must start one fresh build Work for its replacement Preview");
-  assert.match(app, /async function startCreatorTurn\([\s\S]*?if \(liveWork\(runs\.get\(session\) \?\? null, remote\.get\(session\) \?\? null\)\) \{[\s\S]*?setView\(workSurface\(runs\.get\(session\) \?\? null, remote\.get\(session\) \?\? null\)\);[\s\S]*?return;[\s\S]*?const saved = await appendTurn\(session,/u,
-    "a live owner must gate appendTurn before any new Work can start");
+    "a delivered Preview edit must remain a build turn in the same lifecycle");
+  assert.match(app, /async function startCreatorTurn\([\s\S]*?const lifecycle = latestLifecycle\(threads\.get\(session\) \?\? \[\]\);[\s\S]*?if \(lifecycle\) \{[\s\S]*?continueCreatorWork\(session, lifecycle,[\s\S]*?return;[\s\S]*?const saved = await appendTurn\(session,/u,
+    "only the first idea may append a Work; Design, Build, and Edit must steer it");
+  assert.doesNotMatch(app.match(/async function startCreatorTurn[\s\S]*?\n  \}\n\n  async function continueCreatorWork/u)?.[0] ?? "", /endWork\(/u,
+    "answering an awaiting turn must not stop the lifecycle Work");
+  assert.match(app, /async function continueCreatorWork\([\s\S]*?steerTurn\(session, lifecycle\.workId,[\s\S]*?steerLocalWork\(saved\.workId, saved\.id,/u,
+    "the Account turn and native continuation must carry one Work identity");
   assert.match(app, /appendTurn\(session, textValue\.trim\(\), attachmentIds, intent\)/u,
     "the durable Account turn and local Work must share one intent");
   const follower = app.match(/if \(!saved\.created\) \{([\s\S]*?)\n    \}\n    putTurns/u)?.[1] ?? "";
@@ -77,8 +87,8 @@ test("creator edit has one local or phone-owned Work owner", async () => {
     "a phone-owned follower must immediately adopt the existing remote Work");
   assert.doesNotMatch(follower, /startWork|stagePendingInput/u,
     "a 200 follower must never stage or start the first writer's Work");
-  assert.match(app, /const completed = \[\.\.\.remoteRef\.current\.keys\(\)\]\.filter\(\(session\) => !next\.has\(session\)\);[\s\S]*?adoptRemoteDelivery\(session\)/u,
-    "a delivered phone Work must move the desktop out of Building");
+  assert.match(app, /state\?\.state === "delivered"[\s\S]*?const completed = \[\.\.\.remoteRef\.current\.keys\(\)\]\.filter\(\(session\) => !next\.has\(session\)\);[\s\S]*?adoptRemoteDelivery\(session\)/u,
+    "a checkpointed phone Work must leave Building without pretending the Work ended");
   assert.match(app, /\(view === "chat" \|\| view === "preview" \|\| view === "publish"\)[\s\S]*?remote\.get\(active\)\?\.intent === "build"[\s\S]*?setView\("build"\)/u,
     "a phone Edit must replace every open creator phase, including Publish, with Building");
   assert.match(app, /async function adoptRemoteDelivery\(session: string\)[\s\S]*?fetchTurns\(session\)[\s\S]*?setPreviewTarget\([\s\S]*?setView\("preview"\)/u,

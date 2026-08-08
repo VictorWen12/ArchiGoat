@@ -16,6 +16,7 @@ import {
   logout,
   openAccount,
   pendingWorks,
+  publishLocalWork,
   publishProduct,
   renameSession,
   readWork,
@@ -25,6 +26,8 @@ import {
   stagePendingInput,
   startError,
   startWork,
+  steerLocalWork,
+  steerTurn,
   stopRemoteWork,
   stopWork,
   type AgentModel,
@@ -68,6 +71,7 @@ type AuthNotice = "hard" | "soft";
 type Agent = { registered: boolean; state: string; provider: string | null; installed: string[] | null; model: string | null; effort: string | null; models: AgentModel[]; presets: AgentPresets | null };
 type DraftFile = { attachment: Attachment; file: File; busy: boolean };
 type OwedWork = { deliveryId: string; workId: string; intent: WorkIntent };
+type Lifecycle = { deliveryId: string; workId: string };
 type View = "idea" | "chat" | "build" | "preview" | "publish" | "projects" | "connections";
 
 const OWED = "archigoat.work.owed";
@@ -100,6 +104,14 @@ function rememberWork(session: string, owed: OwedWork | null): void {
     else delete all[session];
     window.localStorage.setItem(OWED, JSON.stringify(all));
   } catch { /* the studio still runs when local storage refuses */ }
+}
+
+function latestLifecycle(turns: Turn[]): Lifecycle | null {
+  for (let index = turns.length - 1; index >= 0; index -= 1) {
+    const turn = turns[index];
+    if (turn.workId && turn.deliveryId) return { workId: turn.workId, deliveryId: turn.deliveryId };
+  }
+  return null;
 }
 
 export function App() {
@@ -290,6 +302,7 @@ export function App() {
       for (const summon of summons) {
         if (!summon.computer || owed[summon.scopeId]) continue;
         const state = await remoteWork(summon.workId, summon.intent).catch(() => null);
+        if (state?.state === "delivered") continue;
         if (state) next.set(summon.scopeId, state);
       }
       if (!alive) return;
@@ -604,15 +617,19 @@ export function App() {
 
   // Every creator turn is durable before its typed local Work starts.
   async function startCreatorTurn(session: string, textValue: string, intent: WorkIntent, selected: DraftFile[]): Promise<void> {
-    // A turn the Agent parked on the creator ends when the creator answers it; the answer is the next turn.
-    const waiting = runs.get(session) ?? null;
-    if (waiting?.awaiting && !finished(waiting.phase) && !remote.get(session)) await endWork(session, waiting);
-    else if (liveWork(runs.get(session) ?? null, remote.get(session) ?? null)) {
-      setView(workSurface(runs.get(session) ?? null, remote.get(session) ?? null));
+    const local = runs.get(session) ?? null;
+    const phone = remote.get(session) ?? null;
+    if (liveWork(local, phone) && !local?.awaiting && !phone?.awaiting) {
+      setView(workSurface(local, phone));
       return;
     }
     if (!textValue.trim() && selected.length === 0) return;
     if (selected.some((item) => item.busy)) throw new BridgeError(0, "Wait for attachments to finish uploading.");
+    const lifecycle = latestLifecycle(threads.get(session) ?? []);
+    if (lifecycle) {
+      await continueCreatorWork(session, lifecycle, textValue.trim(), intent, selected, local, phone);
+      return;
+    }
     const attachmentIds = selected.map((item) => item.attachment.id);
     const attached = selected.map((item) => item.attachment);
     setDraft("");
@@ -637,7 +654,10 @@ export function App() {
       setView(workSurface(null, existing));
       return;
     }
-    putTurns(session, [...(threads.get(session) ?? []), { id: saved.id, role: "me", text: textValue.trim(), at: saved.at, attachments: attached }]);
+    putTurns(session, [...(threads.get(session) ?? []), {
+      id: saved.id, role: "me", text: textValue.trim(), at: saved.at,
+      workId: saved.workId, deliveryId: saved.deliveryId, attachments: attached,
+    }]);
     await refreshSessions();
     const controller = new AbortController();
     putRun(session, {
@@ -668,12 +688,49 @@ export function App() {
     }
   }
 
-  // Ends one live Work this computer owns and leaves the session free for the creator's next turn.
-  async function endWork(session: string, live: CreatorRun): Promise<void> {
-    live.controller.abort();
-    rememberWork(session, null);
-    await stopWork(live.workId).catch((reason) => setError(messageOf(reason, "Could not stop this Work")));
-    dropRun(session);
+  async function continueCreatorWork(session: string, lifecycle: Lifecycle, textValue: string, intent: WorkIntent, selected: DraftFile[], local: CreatorRun | null, phone: RemoteWork | null): Promise<void> {
+    const saved = await steerTurn(session, lifecycle.workId, textValue, selected.map((item) => item.attachment.id), phone?.computer);
+    putTurns(session, await fetchTurns(session));
+    await refreshSessions();
+    setDraft("");
+    setFiles([]);
+    setBriefReady((current) => { const next = new Set(current); next.delete(session); return next; });
+    setView(intent === "brief" ? "chat" : "build");
+    if (saved.computer) {
+      const nextWork = await remoteWork(saved.workId, intent);
+      if (nextWork) {
+        const next = new Map(remoteRef.current).set(session, nextWork);
+        remoteRef.current = next;
+        setRemote(next);
+      }
+      return;
+    }
+    await agentHealth();
+    const receipts = await Promise.all(selected.map((item) => stagePendingInput(saved.workId, item.attachment, item.file)));
+    const controller = local?.controller ?? new AbortController();
+    rememberWork(session, { deliveryId: saved.deliveryId, workId: saved.workId, intent });
+    if (local) {
+      patchRun(session, (value) => ({ ...value, intent, phase: "running", awaiting: false, text: "", startedAt: Date.now() }));
+    } else {
+      putRun(session, {
+        workId: saved.workId, deliveryId: saved.deliveryId, intent, phase: "queued", awaiting: false, text: "", events: [],
+        startedAt: Date.now(), typicalMs: null, controller,
+      });
+    }
+    try {
+      await steerLocalWork(saved.workId, saved.id, textValue, receipts);
+      patchRun(session, (value) => ({ ...value, phase: "running" }));
+      if (!local) void follow(session, saved.deliveryId, saved.workId, controller).catch((reason) => {
+        if (!controller.signal.aborted) {
+          patchRun(session, (value) => ({ ...value, phase: "failed" }));
+          setError(messageOf(reason, "Work could not finish"));
+        }
+      });
+    } catch (reason) {
+      rememberWork(session, null);
+      if (!controller.signal.aborted) patchRun(session, (value) => ({ ...value, phase: "failed" }));
+      throw reason;
+    }
   }
 
   async function stop(): Promise<void> {
@@ -691,7 +748,9 @@ export function App() {
 
   async function post(metadata: PublishMetadata): Promise<void> {
     setError("");
+    const lifecycle = latestLifecycle(turns);
     await publishProduct(metadata);
+    if (lifecycle) await publishLocalWork(lifecycle.workId);
     setProjectsReload((value) => value + 1);
     await showProjects();
   }
@@ -786,9 +845,10 @@ export function App() {
                 <BuildPreview
                   surface="preview"
                   product={previewProductForView}
-                  editable={!!previewTarget?.session}
-                  onEdit={() => { if (previewTarget?.session) openWork(previewTarget.session); }}
-                  onContinue={() => setView("publish")}
+                      editable={!!previewTarget?.session}
+                      onEdit={() => { if (previewTarget?.session) openWork(previewTarget.session); }}
+                      onSaveDraft={() => void showProjects()}
+                      onContinue={() => setView("publish")}
                 />
               </div>
             : view === "publish" && previewTarget
