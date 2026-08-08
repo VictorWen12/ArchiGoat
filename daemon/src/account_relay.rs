@@ -379,7 +379,6 @@ async fn execution_worker(
             .or_insert_with(|| Arc::new(Mutex::new(())))
             .clone()
     };
-    let ordered = order.lock().await;
     let stale = Arc::new(AtomicBool::new(false));
     let stale_event = Arc::new(Notify::new());
     let (cancel, cancelled) = watch::channel(false);
@@ -392,6 +391,7 @@ async fn execution_worker(
         stale.clone(),
         stale_event.clone(),
     ));
+    let ordered = order.lock().await;
     // Renewal already owns the lease, so waiting for an execution slot loses nothing; a lease
     // that goes stale during the wait releases the job without ever starting it.
     let admitted = tokio::select! {

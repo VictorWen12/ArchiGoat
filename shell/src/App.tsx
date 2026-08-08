@@ -48,6 +48,7 @@ import { BuildPreview } from "./build-preview";
 import { ChatView, type ChatMessage } from "./chat";
 import {
   agentReady,
+  creatorChatTurns,
   creatorSessionStates,
   deliveredTurn,
   latestBrief,
@@ -158,18 +159,14 @@ export function App() {
     imageUrl: attachment.image ? URL.createObjectURL(file) : undefined,
     busy: uploading,
   })), [files]);
-  // The Agent's words reach the creator while its Work still runs, so a question is never silent.
-  const liveWords = run && !finished(run.phase) ? run.text.trim() : "";
   const chatMessages = useMemo<ChatMessage[]>(() => {
-    const list: ChatMessage[] = turns.map((turn) => ({
+    return creatorChatTurns(turns).map((turn) => ({
       id: `${turn.id}-${turn.at}`,
       role: turn.role === "me" ? "user" : "agent",
       text: turn.text,
       attachments: turn.attachments.map((attachment) => ({ id: attachment.id, name: attachment.name, image: attachment.image })),
     }));
-    if (liveWords) list.push({ id: "live", role: "agent", text: liveWords });
-    return list;
-  }, [liveWords, turns]);
+  }, [turns]);
 
   useEffect(() => () => {
     for (const attachment of creatorAttachments) if (attachment.imageUrl) URL.revokeObjectURL(attachment.imageUrl);

@@ -34,10 +34,22 @@ export type PreviewTarget =
 
 export type PreviewLoad = { url: string | null; error: string };
 
+const FRAMEWORK_FIELDS = ["Mechanic", "Hook", "Looks", "Sound", "Effects", "Assumption"] as const;
+
+function framework(text: string): boolean {
+  return FRAMEWORK_FIELDS.filter((field) => new RegExp(`(?:^|\\n)\\s*(?:#{1,3}\\s*)?${field}\\s*:`, "iu").test(text)).length >= 3;
+}
+
+// Chat owns creator briefs and the locked Framework. Runtime output, paths, classifiers, and
+// products never become conversation UI.
+export function creatorChatTurns(turns: readonly Turn[]): readonly Turn[] {
+  return turns.filter((turn) => turn.role === "me" || (!turn.product && framework(turn.text)));
+}
+
 export function latestBrief(turns: readonly Turn[]): string {
   for (let index = turns.length - 1; index >= 0; index -= 1) {
     const turn = turns[index];
-    if (turn.role === "goat" && !turn.product && turn.text.trim()) return turn.text.trim();
+    if (turn.role === "goat" && !turn.product && framework(turn.text)) return turn.text.trim();
   }
   return "";
 }
@@ -52,6 +64,8 @@ export function latestProduct(turns: readonly Turn[]): Product | null {
 // A finished Work is read from its own delivered turn: a product opens Preview, and words with no
 // product are the Agent's reply, which belongs in the conversation the creator answers in.
 export function deliveredTurn(turns: readonly Turn[]): { product: Product | null; words: string } {
+  const product = latestProduct(turns);
+  if (product) return { product, words: "" };
   const turn = turns.at(-1);
   if (!turn || turn.role !== "goat") return { product: null, words: "" };
   return { product: turn.product ?? null, words: turn.text.trim() };

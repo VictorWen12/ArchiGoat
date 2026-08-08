@@ -48,3 +48,19 @@ test("creator Chat labels delivered-app edits as builds", async () => {
   assert.match(source, /editing \? "Building…" : "Thinking…"/);
   assert.match(source, /editing \? "Apply changes" : "Revise brief"/);
 });
+
+test("creator keeps runtime output out of Chat and keeps the latest app in Preview", async () => {
+  const [app, flow] = await Promise.all([
+    read("shell/src/App.tsx"),
+    read("shell/src/creator-flow.ts"),
+  ]);
+
+  assert.match(app, /creatorChatTurns\(turns\)/u,
+    "Chat must use the creator-visible turn projection");
+  assert.doesNotMatch(app, /liveWords|run\.text\.trim\(\)/u,
+    "native Agent output must never enter Chat");
+  assert.match(flow, /export function creatorChatTurns[\s\S]*turn\.role === "me"[\s\S]*framework/u,
+    "Chat may show only creator briefs and the locked Framework");
+  assert.match(flow, /export function deliveredTurn[\s\S]*const product = latestProduct\(turns\)[\s\S]*if \(product\) return \{ product, words: "" \}/u,
+    "later Agent text must not replace an already delivered Preview");
+});
