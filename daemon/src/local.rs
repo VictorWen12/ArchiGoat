@@ -12,8 +12,11 @@ use axum::{
     response::{IntoResponse, Response},
     routing::{get, post},
 };
+use base64::{Engine as _, engine::general_purpose::STANDARD};
 use serde::{Deserialize, Serialize};
 use std::{
+    fs,
+    path::PathBuf,
     sync::Arc,
     time::{Duration, Instant},
 };
@@ -83,6 +86,67 @@ struct ObserveQuery {
 #[serde(rename_all = "camelCase")]
 struct WorkQuery {
     work_id: String,
+}
+
+// DesignMock carries the optional fixed-path image without creating another upload channel.
+#[derive(Serialize)]
+pub(crate) struct DesignMock {
+    pub(crate) media: &'static str,
+    pub(crate) bytes: String,
+}
+
+// SavedWorkPath reads only the durable path facts needed to find one terminal Work workspace.
+#[derive(Deserialize)]
+struct SavedWorkPath {
+    work_id: String,
+    #[serde(default)]
+    session: Option<PathBuf>,
+}
+
+// DesignMock reads the optional design image from the Work workspace at delivery time.
+pub(crate) async fn design_mock(
+    state: &DaemonState,
+    work_id: &str,
+) -> Result<Option<DesignMock>, String> {
+    let Some(workspace) = work_workspace(state, work_id)? else {
+        return Ok(None);
+    };
+    let path = workspace.join("design").join("mock.png");
+    read_design_mock(&path).await
+}
+
+async fn read_design_mock(path: &std::path::Path) -> Result<Option<DesignMock>, String> {
+    match tokio::fs::read(path).await {
+        Ok(bytes) => Ok(Some(DesignMock {
+            media: "image/png",
+            bytes: STANDARD.encode(bytes),
+        })),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(error) => Err(format!("Design mock is unavailable: {error}")),
+    }
+}
+
+// WorkWorkspace resolves the session saved for this Work and keeps reads inside private Works.
+fn work_workspace(state: &DaemonState, work_id: &str) -> Result<Option<PathBuf>, String> {
+    let bytes = match fs::read(state.work_state_path()) {
+        Ok(bytes) => bytes,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => return Err(format!("Work state is unavailable: {error}")),
+    };
+    let records: Vec<SavedWorkPath> =
+        serde_json::from_slice(&bytes).map_err(|_| "Work state is invalid".to_owned())?;
+    let Some(session) = records
+        .into_iter()
+        .find(|record| record.work_id == work_id)
+        .and_then(|record| record.session)
+    else {
+        return Ok(None);
+    };
+    let works_root = state.private_root()?.join("Works");
+    if !session.starts_with(&works_root) {
+        return Err("Work workspace is outside private storage".to_owned());
+    }
+    Ok(Some(session.join("Work")))
 }
 
 // LocalDeliveryRequest carries only the ephemeral Account session and frozen destination facts.
@@ -747,4 +811,51 @@ fn valid_work(value: String) -> Result<String, ApiError> {
     crate::work::valid_work_id(&value)
         .map(|()| value)
         .map_err(|_| ApiError(StatusCode::BAD_REQUEST, "Work identity is invalid"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    #[tokio::test]
+    async fn design_mock_reads_present_bytes_and_returns_none_when_absent() {
+        let root = std::env::temp_dir().join(format!(
+            "archigoat-design-mock-{}-{}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .expect("test clock should be after epoch")
+                .as_nanos()
+        ));
+        let path = root.join("design").join("mock.png");
+        tokio::fs::create_dir_all(path.parent().expect("mock parent should exist"))
+            .await
+            .expect("mock directory should be created");
+        tokio::fs::write(&path, [0_u8, 1, 2, 255])
+            .await
+            .expect("mock bytes should be written");
+
+        let mock = read_design_mock(&path)
+            .await
+            .expect("present mock should be readable")
+            .expect("present mock should be attached");
+        assert_eq!(
+            serde_json::to_value(&mock).expect("mock should serialize"),
+            serde_json::json!({
+                "media": "image/png",
+                "bytes": "AAEC/w=="
+            })
+        );
+
+        tokio::fs::remove_dir_all(&root)
+            .await
+            .expect("test mock directory should be removed");
+        assert!(
+            read_design_mock(&path)
+                .await
+                .expect("absent mock should not error")
+                .is_none()
+        );
+    }
 }

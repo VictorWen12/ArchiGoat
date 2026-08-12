@@ -37,13 +37,12 @@ export type PreviewLoad = { url: string | null; error: string };
 const FRAMEWORK_FIELDS = ["Mechanic", "Hook", "Looks", "Sound", "Effects", "Assumption"] as const;
 
 function framework(text: string): boolean {
-  return FRAMEWORK_FIELDS.filter((field) => new RegExp(`(?:^|\\n)\\s*(?:#{1,3}\\s*)?${field}\\s*:`, "iu").test(text)).length >= 3;
+  return FRAMEWORK_FIELDS.every((field) => new RegExp(`(?:^|\\n)\\s*(?:#{1,3}\\s*)?${field}\\s*:`, "iu").test(text));
 }
 
-// Chat owns creator briefs and the locked Framework. Runtime output, paths, classifiers, and
-// products never become conversation UI.
+// Chat renders every creator and Agent turn; Framework recognition only decorates design replies.
 export function creatorChatTurns(turns: readonly Turn[]): readonly Turn[] {
-  return turns.filter((turn) => turn.role === "me" || (!turn.product && framework(turn.text)));
+  return turns;
 }
 
 export function latestBrief(turns: readonly Turn[]): string {
