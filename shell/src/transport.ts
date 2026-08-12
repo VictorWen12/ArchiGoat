@@ -502,7 +502,7 @@ export async function uploadAttachment(file: File): Promise<Attachment> {
   return { id: value.id, name: file.name, media: file.type || "application/octet-stream", bytes: file.size, sha256: digest, image: file.type.startsWith("image/"), url: `/auth/attachments/${encodeURIComponent(value.id)}` };
 }
 
-// AttachmentImageUrl turns authorized history bytes into a CSP-safe image source after verifying their identity.
+// AttachmentImageUrl turns authenticated history bytes into an image after verifying their identity.
 export async function attachmentImageUrl(attachment: Attachment): Promise<string> {
   const bytes = await (await accountRequest(attachment.url)).blob();
   if (!attachment.image || bytes.size !== attachment.bytes || await sha256(bytes) !== attachment.sha256) {

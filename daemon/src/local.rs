@@ -133,8 +133,8 @@ fn work_workspace(state: &DaemonState, work_id: &str) -> Result<Option<PathBuf>,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
         Err(error) => return Err(format!("Work state is unavailable: {error}")),
     };
-    let records: Vec<SavedWorkPath> = serde_json::from_slice(&bytes)
-        .map_err(|_| "Work state is invalid".to_owned())?;
+    let records: Vec<SavedWorkPath> =
+        serde_json::from_slice(&bytes).map_err(|_| "Work state is invalid".to_owned())?;
     let Some(session) = records
         .into_iter()
         .find(|record| record.work_id == work_id)
@@ -851,9 +851,11 @@ mod tests {
         tokio::fs::remove_dir_all(&root)
             .await
             .expect("test mock directory should be removed");
-        assert!(read_design_mock(&path)
-            .await
-            .expect("absent mock should not error")
-            .is_none());
+        assert!(
+            read_design_mock(&path)
+                .await
+                .expect("absent mock should not error")
+                .is_none()
+        );
     }
 }

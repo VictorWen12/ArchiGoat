@@ -471,9 +471,11 @@ mod tests {
             design_mock: None,
         };
         let encoded = serde_json::to_value(absent).expect("absent mock request should encode");
-        assert!(!encoded
-            .as_object()
-            .expect("delivery request should be an object")
-            .contains_key("designMock"));
+        assert!(
+            !encoded
+                .as_object()
+                .expect("delivery request should be an object")
+                .contains_key("designMock")
+        );
     }
 }
