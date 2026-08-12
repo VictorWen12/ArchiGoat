@@ -361,8 +361,11 @@ async fn send_to(
         product_ids.push(receipt.product_id);
     }
 
+    // A mock the daemon cannot read is a text-only delivery, never a failed one.
     let design_mock = if mode.local() {
-        crate::local::design_mock(state, work_id).await?
+        crate::local::design_mock(state, work_id)
+            .await
+            .unwrap_or_default()
     } else {
         None
     };
