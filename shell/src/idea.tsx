@@ -1,10 +1,11 @@
-import { useEffect, useRef, type ChangeEvent, type ClipboardEvent, type FormEvent, type KeyboardEvent } from "react";
-import type { Attachment } from "./transport";
+import { useEffect, useRef, useState, type ChangeEvent, type ClipboardEvent, type FormEvent, type KeyboardEvent } from "react";
+import { attachmentImageUrl, type Attachment } from "./transport";
 import "./creator.css";
 
 /// The small attachment shape shared by the idea and chat composers.
 export type CreatorAttachment = Pick<Attachment, "id" | "name" | "image"> & {
   imageUrl?: string;
+  remote?: Attachment;
   busy?: boolean;
 };
 
@@ -87,11 +88,32 @@ export function IdeaView({ value, attachments, busy = false, error = "", onChang
 export function AttachmentList({ attachments, onRemove }: { attachments: readonly CreatorAttachment[]; onRemove?(id: string): void | Promise<void> }) {
   return <ul className="creator-attachments" aria-label="Attachments">
     {attachments.map((item) => <li key={item.id}>
-      {item.image && item.imageUrl ? <img src={item.imageUrl} alt="" /> : <span className="creator-file" aria-hidden="true">FILE</span>}
+      <AttachmentImage item={item} />
       <span className="creator-attachment-name">{item.name}</span>
       {item.busy ? <span className="creator-attachment-state">Uploading…</span> : onRemove && <button type="button" className="creator-remove" onClick={() => void onRemove(item.id)} aria-label={`Remove ${item.name}`}>×</button>}
     </li>)}
   </ul>;
+}
+
+// AttachmentImage loads history through the native Account bridge and releases its private blob on exit.
+function AttachmentImage({ item }: { item: CreatorAttachment }) {
+  const [remoteUrl, setRemoteUrl] = useState<string>();
+  useEffect(() => {
+    if (!item.remote) return;
+    let live = true;
+    let url: string | undefined;
+    void attachmentImageUrl(item.remote).then((value) => {
+      url = value;
+      if (live) setRemoteUrl(value);
+      else URL.revokeObjectURL(value);
+    }).catch(() => undefined);
+    return () => {
+      live = false;
+      if (url) URL.revokeObjectURL(url);
+    };
+  }, [item.remote]);
+  const url = item.remote ? remoteUrl : item.imageUrl;
+  return item.image && url ? <img src={url} alt="" /> : <span className="creator-file" aria-hidden="true">FILE</span>;
 }
 
 export const IdeaComposer = IdeaView;

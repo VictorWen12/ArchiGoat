@@ -502,6 +502,15 @@ export async function uploadAttachment(file: File): Promise<Attachment> {
   return { id: value.id, name: file.name, media: file.type || "application/octet-stream", bytes: file.size, sha256: digest, image: file.type.startsWith("image/"), url: `/auth/attachments/${encodeURIComponent(value.id)}` };
 }
 
+// AttachmentImageUrl turns authorized history bytes into a CSP-safe image source after verifying their identity.
+export async function attachmentImageUrl(attachment: Attachment): Promise<string> {
+  const bytes = await (await accountRequest(attachment.url)).blob();
+  if (!attachment.image || bytes.size !== attachment.bytes || await sha256(bytes) !== attachment.sha256) {
+    throw new BridgeError(0, "TrianGoat returned an invalid attachment.");
+  }
+  return URL.createObjectURL(new Blob([bytes], { type: attachment.media }));
+}
+
 export async function deleteAttachment(id: string): Promise<void> {
   await accountRequest(`/auth/attachments/${encodeURIComponent(id)}`, { method: "DELETE" });
 }

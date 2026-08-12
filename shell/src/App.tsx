@@ -164,7 +164,7 @@ export function App() {
       id: `${turn.id}-${turn.at}`,
       role: turn.role === "me" ? "user" : "agent",
       text: turn.text,
-      attachments: turn.attachments.map((attachment) => ({ id: attachment.id, name: attachment.name, image: attachment.image, imageUrl: attachment.image ? attachment.url : undefined })),
+      attachments: turn.attachments.map((attachment) => ({ id: attachment.id, name: attachment.name, image: attachment.image, imageUrl: attachment.image ? attachment.url : undefined, remote: attachment })),
     }));
   }, [turns]);
 

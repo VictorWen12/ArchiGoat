@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 
@@ -9,6 +10,17 @@ function section(source, start, end) {
   const match = source.match(new RegExp(`${start}[\\s\\S]*?(?=${end})`));
   assert.ok(match, `expected ${start} section`);
   return match[0];
+}
+
+async function transportModule() {
+  const [source, typescript] = await Promise.all([
+    read("shell/src/transport.ts"),
+    import(new URL("../../shell/node_modules/typescript/lib/typescript.js", import.meta.url)),
+  ]);
+  const javascript = typescript.transpileModule(source, {
+    compilerOptions: { module: typescript.ModuleKind.ESNext, target: typescript.ScriptTarget.ES2022 },
+  }).outputText;
+  return import(`data:text/javascript;base64,${Buffer.from(javascript).toString("base64")}`);
 }
 
 test("present design/mock.png becomes the exact designMock carrier on delivery", async () => {
@@ -49,4 +61,39 @@ test("the six design field names equal FRAMEWORK_FIELDS", async () => {
   assert.ok(match, "FRAMEWORK_FIELDS must remain the design field authority");
   const fields = [...match[1].matchAll(/"([^"]+)"/gu)].map((item) => item[1]);
   assert.deepEqual(fields, ["Mechanic", "Hook", "Looks", "Sound", "Effects", "Assumption"]);
+});
+
+test("history images load through the authenticated native bridge as renderable blobs", async (context) => {
+  const bytes = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10, 1, 2, 3]);
+  const token = "a".repeat(64);
+  const previousWindow = globalThis.window;
+  globalThis.window = {
+    __TAURI_INTERNALS__: {
+      async invoke(command, args) {
+        if (command === "credential_get") return token;
+        assert.equal(command, "account_request");
+        assert.equal(args.request.path, "/auth/attachments/mock");
+        assert.ok(args.request.headers.some(([name, value]) => name === "authorization" && value === `Bearer ${token}`));
+        return { status: 200, body: [...bytes] };
+      },
+    },
+  };
+  context.after(() => { globalThis.window = previousWindow; });
+
+  const transport = await transportModule();
+  await transport.nativeSession();
+  const url = await transport.attachmentImageUrl({
+    id: "mock",
+    name: "mock.png",
+    media: "image/png",
+    bytes: bytes.length,
+    sha256: createHash("sha256").update(bytes).digest("hex"),
+    image: true,
+    url: "/auth/attachments/mock",
+  });
+  context.after(() => URL.revokeObjectURL(url));
+
+  const image = await fetch(url);
+  assert.equal(image.headers.get("content-type"), "image/png");
+  assert.deepEqual(Buffer.from(await image.arrayBuffer()), bytes);
 });
