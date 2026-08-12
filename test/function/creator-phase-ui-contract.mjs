@@ -60,18 +60,44 @@ test("creator composers attach pasted images", async () => {
   assert.match(chat, /<textarea[\s\S]*onPaste=\{paste\}/u);
 });
 
-test("creator keeps runtime output out of Chat and keeps the latest app in Preview", async () => {
+test("creator Chat keeps every turn and the latest app in Preview", async () => {
   const [app, flow] = await Promise.all([
     read("shell/src/App.tsx"),
     read("shell/src/creator-flow.ts"),
   ]);
 
+  function body(name) {
+    const start = flow.indexOf(`export function ${name}`);
+    assert.notEqual(start, -1, `expected ${name}`);
+    const open = flow.indexOf("{", start);
+    let depth = 0;
+    for (let index = open; index < flow.length; index += 1) {
+      if (flow[index] === "{") depth += 1;
+      if (flow[index] === "}" && --depth === 0) return flow.slice(open + 1, index);
+    }
+    assert.fail(`${name} has no closing brace`);
+  }
+
+  const framework = (text) => ["Mechanic", "Hook", "Looks", "Sound", "Effects", "Assumption"]
+    .every((field) => new RegExp(`(?:^|\\n)\\s*(?:#{1,3}\\s*)?${field}:`, "iu").test(text));
+  const creatorChatTurns = new Function("framework", `return function (turns) {${body("creatorChatTurns")}}`)(framework);
+  const latestBrief = new Function("framework", `return function (turns) {${body("latestBrief")}}`)(framework);
+  const design = "Mechanic: tap\nHook: duel\nLooks: bright\nSound: crisp\nEffects: sparks\nAssumption: thumb play";
+  const turns = [
+    { id: 1, role: "me", text: "Make it quick", at: 1, attachments: [] },
+    { id: 2, role: "goat", text: "I need one decision", at: 2, attachments: [] },
+    { id: 3, role: "goat", text: design, at: 3, attachments: [] },
+    { id: 4, role: "goat", text: "A delivered app reply", at: 4, attachments: [], product: { id: "app" } },
+  ];
+
+  assert.deepEqual(creatorChatTurns(turns), turns,
+    "Chat must keep every creator and Agent turn, including ordinary and delivered replies");
+  assert.equal(latestBrief(turns), design,
+    "field recognition may still decorate the latest six-field design reply");
   assert.match(app, /creatorChatTurns\(turns\)/u,
-    "Chat must use the creator-visible turn projection");
-  assert.doesNotMatch(app, /liveWords|run\.text\.trim\(\)/u,
-    "native Agent output must never enter Chat");
-  assert.match(flow, /export function creatorChatTurns[\s\S]*turn\.role === "me"[\s\S]*framework/u,
-    "Chat may show only creator briefs and the locked Framework");
+    "Chat must render the complete conversation projection");
+  assert.match(app, /imageUrl: attachment\.image \? attachment\.url : undefined/u,
+    "history images must retain their authorized attachment URL");
   assert.match(flow, /export function deliveredTurn[\s\S]*const product = latestProduct\(turns\)[\s\S]*if \(product\) return \{ product, words: "" \}/u,
     "later Agent text must not replace an already delivered Preview");
 });

@@ -64,6 +64,8 @@ struct LocalDeliveryRequest<'a> {
     work_id: &'a str,
     answer: &'a str,
     products: Vec<ProductRef>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    design_mock: Option<crate::local::DesignMock>,
 }
 
 /// DeliveryReceipt proves Account committed this exact Work result.
@@ -359,6 +361,11 @@ async fn send_to(
         product_ids.push(receipt.product_id);
     }
 
+    let design_mock = if mode.local() {
+        crate::local::design_mock(state, work_id).await?
+    } else {
+        None
+    };
     let uploaded = product_ids.len();
     let response = match mode {
         DeliveryMode::Remote { credential } => super::authorized_request(
@@ -397,6 +404,7 @@ async fn send_to(
                 .into_iter()
                 .map(|id| ProductRef { id })
                 .collect(),
+            design_mock,
         })
         .timeout(super::METADATA_TIMEOUT)
         .send()
@@ -424,4 +432,48 @@ async fn send_to(
         return Err("Account Work receipt does not match".to_owned());
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn local_delivery_serializes_design_mock_and_omits_absent_mock() {
+        let request = LocalDeliveryRequest {
+            scope_kind: "goat",
+            scope_id: "scope",
+            delivery_id: "delivery",
+            work_id: "work",
+            answer: "answer",
+            products: Vec::new(),
+            design_mock: Some(crate::local::DesignMock {
+                media: "image/png",
+                bytes: "AAEC/w==".to_owned(),
+            }),
+        };
+        let encoded = serde_json::to_value(request).expect("design mock request should encode");
+        assert_eq!(
+            encoded.get("designMock"),
+            Some(&serde_json::json!({
+                "media": "image/png",
+                "bytes": "AAEC/w=="
+            }))
+        );
+
+        let absent = LocalDeliveryRequest {
+            scope_kind: "goat",
+            scope_id: "scope",
+            delivery_id: "delivery",
+            work_id: "work",
+            answer: "answer",
+            products: Vec::new(),
+            design_mock: None,
+        };
+        let encoded = serde_json::to_value(absent).expect("absent mock request should encode");
+        assert!(!encoded
+            .as_object()
+            .expect("delivery request should be an object")
+            .contains_key("designMock"));
+    }
 }
