@@ -96,8 +96,8 @@ test("creator Chat keeps every turn and the latest app in Preview", async () => 
     "field recognition may still decorate the latest six-field design reply");
   assert.match(app, /creatorChatTurns\(turns\)/u,
     "Chat must render the complete conversation projection");
-  assert.match(app, /imageUrl: attachment\.image \? attachment\.url : undefined/u,
-    "history images must retain their authorized attachment URL");
+  assert.match(app, /remote: attachment/u,
+    "history images must retain the metadata loaded through the authenticated bridge");
   assert.match(flow, /export function deliveredTurn[\s\S]*const product = latestProduct\(turns\)[\s\S]*if \(product\) return \{ product, words: "" \}/u,
     "later Agent text must not replace an already delivered Preview");
 });
